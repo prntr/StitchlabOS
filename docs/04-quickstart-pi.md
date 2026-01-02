@@ -38,7 +38,30 @@ curl http://localhost:7125/printer/info
 
 ## Validate StitchLAB extras (if installed)
 
+### G-Code Studio viewer (deployed build check)
+
+Confirm which 2D viewer is active in the deployed bundle:
+
+```bash
+ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'PaperScope' /home/pi/mainsail/assets | head -n 1"
+ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'gcode2dviewer.js' /home/pi/mainsail/assets | head -n 1"
+```
+
+Interpretation:
+
 ### live control daemon
+### G-Code Studio viewer (deployed build check)
+
+Confirm which 2D viewer is active in the deployed bundle:
+
+```bash
+ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'PaperScope' /home/pi/mainsail/assets | head -n 1"
+ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'gcode2dviewer.js' /home/pi/mainsail/assets | head -n 1"
+```
+
+Interpretation:
+- If `PaperScope` appears and `gcode2dviewer.js` does not, the Paper.js viewer is deployed.
+- If `gcode2dviewer.js` appears, the legacy Handibot viewer is deployed.
 
 ```bash
 systemctl status live_jogd

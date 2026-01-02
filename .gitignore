@@ -6,6 +6,7 @@
 .idea/
 MainsailDev.code-workspace
 .github/
+.claude/
 
 # Node / web builds & deps (umbrella-level)
 **/node_modules/
