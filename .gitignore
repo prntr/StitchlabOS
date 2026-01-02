@@ -1,0 +1,45 @@
+# Umbrella repo ignore rules (StitchLAB workspace)
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+MainsailDev.code-workspace
+.github/
+
+# Node / web builds & deps (umbrella-level)
+**/node_modules/
+**/dist/
+**/dev-dist/
+**/.vite/
+**/.cache/
+**/.turbo/
+**/.eslintcache
+**/coverage/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+
+# Docker / misc
+**/.docker/
+
+# Runtime / generated machine data (do not version)
+virtual-klipper-printer/printer_data/
+virtual-klipper-printer/mjpg_streamer_images/
+
+# Firmware/PIO build artifacts
+**/.pio/
+**/.piolibdeps/
+**/.clangd/
+
+# Nested git repos are tracked separately
+mainsail/
+turtlestitch/
+virtual-klipper-printer/
+

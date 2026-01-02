@@ -1,0 +1,14 @@
+[Unit]
+Description=TurtleStitch Offline Server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/turtlestitch
+ExecStart=/usr/bin/python3 /home/pi/turtlestitch-server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
