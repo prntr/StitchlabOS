@@ -58,8 +58,10 @@ jobs:
       - name: Build image
         run: |
           sudo modprobe loop
-          sudo bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build_custom_os" \
-            "$GITHUB_WORKSPACE/stitchlabos/image/src"
+          sudo \
+            DIST_PATH="$GITHUB_WORKSPACE/stitchlabos/image/src" \
+            CUSTOM_PI_OS_PATH="$GITHUB_WORKSPACE/CustomPiOS/src" \
+            bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
         timeout-minutes: 90
         env:
           CLEAN: true
