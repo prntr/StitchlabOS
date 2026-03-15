@@ -57,15 +57,13 @@ jobs:
 
       - name: Download Raspberry Pi OS base image
         run: |
-          mkdir -p stitchlabos/image/src/workspace
+          # CustomPiOS looks for base images in $DIST_PATH/image-{BOARD}/ directory
+          mkdir -p stitchlabos/image/src/image-raspberrypiarm64
           echo "Fetching latest Raspberry Pi OS Lite arm64..."
           wget -q --show-progress \
             "https://downloads.raspberrypi.com/raspios_lite_arm64_latest" \
-            -O stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz
-          ls -lh stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz
-          # Tell CustomPiOS where to find the base image via config.local
-          echo "export BASE_ZIP_IMG=\"$GITHUB_WORKSPACE/stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz\"" \
-            > stitchlabos/image/src/config.local
+            -O stitchlabos/image/src/image-raspberrypiarm64/raspios_lite_arm64.img.xz
+          ls -lh stitchlabos/image/src/image-raspberrypiarm64/
 
       - name: Build image
         run: |
