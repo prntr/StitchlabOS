@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# StitchLabOS - live_jogd Module
+# USB serial bridge daemon for StitchLab Dongle (ESP32-C3)
+
+set -e
+source /common.sh
+
+echo "=== StitchLabOS: Installing live_jogd ==="
+
+# Install Python serial dependencies
+apt-get update
+apt-get install -y python3-serial
+
+# Unpack live_jogd files
+unpack /filesystem/home/pi /home/pi pi
+unpack /filesystem/etc /etc root
+
+# Create Python virtual environment
+cd ${LIVE_JOGD_DIR}
+sudo -u pi python3 -m venv venv
+sudo -u pi ${LIVE_JOGD_DIR}/venv/bin/pip install --upgrade pip
+sudo -u pi ${LIVE_JOGD_DIR}/venv/bin/pip install -r requirements.txt
+
+# Make scripts executable
+chmod +x ${LIVE_JOGD_DIR}/dongle_api.py
+
+# Reload udev rules
+udevadm control --reload-rules
+
+# Enable the service (won't start until hardware is connected)
+systemctl daemon-reload
+systemctl enable live_jogd
+
+echo "=== live_jogd module complete ==="
+echo "NOTE: Service will start automatically when StitchLab Dongle is connected"

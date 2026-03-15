@@ -1,0 +1,28 @@
+[Unit]
+Description=Live Jog Daemon for Klipper
+Documentation=https://github.com/yourusername/KlipperLiveControl
+After=klipper.service moonraker.service nginx.service
+Requires=klipper.service moonraker.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/live_jogd
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -e /dev/stitchlab-dongle ] && exit 0; sleep 1; done; exit 1'
+ExecStartPre=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi on
+ExecStart=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/live_jogd.py
+ExecStopPost=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi off
+Restart=always
+RestartSec=3
+
+# Give access to serial port
+SupplementaryGroups=dialout
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=live_jogd
+
+[Install]
+WantedBy=multi-user.target

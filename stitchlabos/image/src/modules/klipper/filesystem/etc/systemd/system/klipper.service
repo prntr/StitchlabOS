@@ -1,0 +1,19 @@
+[Unit]
+Description=Klipper 3D Printer Firmware
+Documentation=https://www.klipper3d.org/
+After=network-online.target
+Wants=moonraker.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+RemainAfterExit=yes
+WorkingDirectory=/home/pi/klipper
+EnvironmentFile=/home/pi/printer_data/systemd/klipper.env
+ExecStart=/home/pi/klippy-env/bin/python /home/pi/klipper/klippy/klippy.py /home/pi/printer_data/config/printer.cfg -l /home/pi/printer_data/logs/klippy.log -I /home/pi/printer_data/comms/klippy.serial -a /home/pi/printer_data/comms/klippy.sock
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

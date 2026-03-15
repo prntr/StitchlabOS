@@ -1,0 +1,20 @@
+[Unit]
+Description=API Server for Klipper
+Documentation=https://moonraker.readthedocs.io/
+After=network-online.target klipper.service
+Wants=klipper.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+SupplementaryGroups=video
+RemainAfterExit=yes
+WorkingDirectory=/home/pi/moonraker
+EnvironmentFile=/home/pi/printer_data/systemd/moonraker.env
+ExecStart=/home/pi/moonraker-env/bin/python /home/pi/moonraker/moonraker/moonraker.py -d /home/pi/printer_data
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

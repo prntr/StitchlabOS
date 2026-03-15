@@ -1,0 +1,20 @@
+{
+  "os_list": [
+    {
+      "name": "StitchLabOS",
+      "description": "DIY embroidery machine OS with Klipper, Mainsail, TurtleStitch, and AccessPopup",
+      "icon": "https://raw.githubusercontent.com/stitchlab/stitchlabos/main/stitchlabos/image/icon.png",
+      "url": "https://github.com/stitchlab/stitchlabos/releases/latest/download/StitchLabOS-latest.img.xz",
+      "extract_size": 8000000000,
+      "extract_sha256": "PLACEHOLDER_SHA256_UPDATE_ON_RELEASE",
+      "image_download_size": 2000000000,
+      "release_date": "2026-01-18",
+      "init_format": "cloudinit-rpi",
+      "website": "https://github.com/stitchlab/stitchlabos",
+      "devices": [
+        "pi4-64bit",
+        "pi5-64bit"
+      ]
+    }
+  ]
+}

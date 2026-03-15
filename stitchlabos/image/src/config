@@ -1,0 +1,35 @@
+# StitchLabOS CustomPiOS Configuration
+# Based on Raspberry Pi OS Full (Trixie/Debian 13, 64-bit)
+
+# Base image configuration
+export DIST_NAME="StitchLabOS"
+export DIST_VERSION="0.1.0"
+
+# Use Raspberry Pi OS Lite 64-bit (Trixie)
+# Lite is smaller (~500MB vs 2GB) and better for headless embedded devices
+export BASE_BOARD="raspberrypiarm64"
+export BASE_IMAGE_SECTION="latest"
+
+# Alternative: specify exact image URL if needed
+# export BASE_IMAGE_URL="https://downloads.raspberrypi.org/raspios_arm64/images/raspios_arm64-2025-XX-XX/..."
+
+# Module configuration
+# Modules are executed in order, nested modules allow cleanup at the end
+# - klipper: Installs Klipper + Moonraker
+# - kiauh: Clones KIAUH as update tool
+# - katapult: Clones Katapult bootloader
+# - accesspopup: AP mode fallback
+# - mainsail: Web UI + nginx
+# - turtlestitch: TurtleStitch offline editor
+# - live-jogd: USB serial bridge daemon
+# - stitchlabos: Final customizations (wifi_manager, macros, etc.)
+export MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd,stitchlabos)"
+
+# Default hostname (user can override via Pi Imager)
+export DIST_HOSTNAME="stitchlab"
+
+# Keep cloud-init for Pi Imager customization support
+export KEEP_CLOUDINIT="yes"
+
+# Image output settings
+export IMG_NAME="${DIST_NAME}-${DIST_VERSION}"

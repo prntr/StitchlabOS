@@ -1,0 +1,5 @@
+# Katapult Module Configuration
+# Installs Katapult bootloader for MCU flashing
+
+export KATAPULT_REPO="https://github.com/Arksine/katapult.git"
+export KATAPULT_DIR="/home/pi/katapult"

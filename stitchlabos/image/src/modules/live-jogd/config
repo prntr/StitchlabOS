@@ -1,0 +1,4 @@
+# live_jogd Module Configuration
+# USB serial bridge daemon for StitchLab Dongle
+
+export LIVE_JOGD_DIR="/home/pi/live_jogd"

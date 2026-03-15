@@ -1,0 +1,4 @@
+# StitchLabOS Module Configuration
+# Final customizations for StitchLab embroidery machine OS
+
+export STITCHLABOS_HOSTNAME="stitchlab"

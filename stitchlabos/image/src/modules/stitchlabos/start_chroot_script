@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# StitchLabOS - Final Customizations Module
+# WiFi manager, embroidery macros, and system configuration
+
+set -e
+source /common.sh
+
+echo "=== StitchLabOS: Applying final customizations ==="
+
+# Install additional packages for WiFi management
+apt-get update
+apt-get install -y avahi-daemon dnsmasq
+
+# Unpack StitchLabOS files
+unpack /filesystem/home/pi /home/pi pi
+unpack /filesystem/etc /etc root
+
+# Make WiFi scripts executable
+chmod +x /home/pi/printer_data/scripts/wifi_*.sh
+
+# Add [wifi_manager] to moonraker.conf if not present
+if ! grep -q '\[wifi_manager\]' /home/pi/printer_data/config/moonraker.conf 2>/dev/null; then
+    echo "" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# === STITCHLABOS: WiFi Manager ===" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# Custom Moonraker component for WiFi management via AccessPopup/NetworkManager" >> /home/pi/printer_data/config/moonraker.conf
+    echo "[wifi_manager]" >> /home/pi/printer_data/config/moonraker.conf
+fi
+
+# Configure Avahi for wlan0 only (prevents mDNS issues in AP mode)
+if [ -f /etc/avahi/avahi-daemon.conf ]; then
+    sed -i 's/^#allow-interfaces=.*/allow-interfaces=wlan0/' /etc/avahi/avahi-daemon.conf
+    sed -i 's/^#enable-reflector=no/enable-reflector=yes/' /etc/avahi/avahi-daemon.conf
+    # If allow-interfaces line doesn't exist, add it
+    if ! grep -q '^allow-interfaces=' /etc/avahi/avahi-daemon.conf; then
+        sed -i '/^\[server\]/a allow-interfaces=wlan0' /etc/avahi/avahi-daemon.conf
+    fi
+fi
+
+# Set default hostname (user can override via Pi Imager)
+echo "${STITCHLABOS_HOSTNAME}" > /etc/hostname
+sed -i "s/127.0.1.1.*/127.0.1.1\t${STITCHLABOS_HOSTNAME}/" /etc/hosts
+
+# Ensure correct ownership
+chown -R pi:pi /home/pi/printer_data
+chown -R pi:pi /home/pi/moonraker
+
+echo "=== StitchLabOS customizations complete ==="

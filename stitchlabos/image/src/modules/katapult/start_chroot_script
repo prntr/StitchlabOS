@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# StitchLabOS - Katapult Module
+# Installs Katapult bootloader for CAN/USB MCU flashing
+
+set -e
+source /common.sh
+
+echo "=== StitchLabOS: Installing Katapult ==="
+
+# Clone Katapult
+echo "Cloning Katapult..."
+sudo -u pi git clone ${KATAPULT_REPO} ${KATAPULT_DIR}
+
+# Note: Katapult requires manual configuration via 'make menuconfig'
+# and building for specific MCU targets. This is left to the user.
+
+echo "=== Katapult module complete ==="
+echo "NOTE: Run 'cd ~/katapult && make menuconfig' to configure for your MCU"

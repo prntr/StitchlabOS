@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# StitchLabOS - AccessPopup Module
+# Installs AccessPopup for automatic AP fallback mode
+
+set -e
+source /common.sh
+
+echo "=== StitchLabOS: Installing AccessPopup ==="
+
+# Ensure NetworkManager is installed
+apt-get update
+apt-get install -y network-manager
+
+# Unpack AccessPopup files
+unpack /filesystem/home/pi /home/pi pi
+
+# Make scripts executable
+chmod +x /home/pi/AccessPopup/accesspopup
+chmod +x /home/pi/AccessPopup/installconfig.sh
+
+# Run AccessPopup installer
+# The installer sets up the service, timer, and AP profile
+cd /home/pi/AccessPopup
+
+# Create a non-interactive configuration
+# AccessPopup's installconfig.sh is interactive, so we'll set it up manually
+echo "Setting up AccessPopup manually..."
+
+# Install the main script to /usr/bin
+cp /home/pi/AccessPopup/accesspopup /usr/bin/accesspopup
+chmod +x /usr/bin/accesspopup
+
+# Create systemd service
+cat > /etc/systemd/system/AccessPopup.service << 'EOF'
+[Unit]
+Description=AccessPopup WiFi Fallback
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/accesspopup
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create systemd timer (runs every 2 minutes)
+cat > /etc/systemd/system/AccessPopup.timer << 'EOF'
+[Unit]
+Description=AccessPopup WiFi Fallback Timer
+After=NetworkManager.service
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=2min
+Unit=AccessPopup.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Create the AP profile for NetworkManager
+# This creates a hotspot named "AccessPopup" with IP 192.168.50.5
+cat > /etc/NetworkManager/system-connections/AccessPopup.nmconnection << 'EOF'
+[connection]
+id=AccessPopup
+uuid=f0e1d2c3-b4a5-6789-0abc-def123456789
+type=wifi
+autoconnect=false
+interface-name=wlan0
+
+[wifi]
+band=bg
+channel=6
+mode=ap
+ssid=AccessPopup
+
+[wifi-security]
+key-mgmt=none
+
+[ipv4]
+address1=192.168.50.5/24
+method=shared
+
+[ipv6]
+addr-gen-mode=default
+method=ignore
+EOF
+
+chmod 600 /etc/NetworkManager/system-connections/AccessPopup.nmconnection
+
+# Enable the timer
+systemctl daemon-reload
+systemctl enable AccessPopup.timer
+
+echo "=== AccessPopup module complete ==="

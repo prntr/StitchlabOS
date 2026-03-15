@@ -1,0 +1,5 @@
+# KIAUH Module Configuration
+# Installs KIAUH as a management tool (for future updates)
+
+export KIAUH_REPO="https://github.com/dw-0/kiauh.git"
+export KIAUH_DIR="/home/pi/kiauh"

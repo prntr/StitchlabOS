@@ -1,0 +1,3 @@
+# StitchLab Dongle (ESP32-C3) udev rule
+# Creates symlink /dev/stitchlab-dongle for the USB serial device
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="stitchlab-dongle"

@@ -1,0 +1,17 @@
+# Klipper Module Configuration
+# Installs Klipper and Moonraker
+
+# Klipper repository
+export KLIPPER_REPO="https://github.com/Klipper3d/klipper.git"
+export KLIPPER_BRANCH="master"
+
+# Moonraker repository
+export MOONRAKER_REPO="https://github.com/Arksine/moonraker.git"
+export MOONRAKER_BRANCH="master"
+
+# Installation paths
+export KLIPPER_DIR="/home/pi/klipper"
+export MOONRAKER_DIR="/home/pi/moonraker"
+export KLIPPY_ENV="/home/pi/klippy-env"
+export MOONRAKER_ENV="/home/pi/moonraker-env"
+export PRINTER_DATA="/home/pi/printer_data"
