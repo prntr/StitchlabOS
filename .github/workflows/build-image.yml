@@ -1,0 +1,129 @@
+name: Build StitchLabOS Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  DIST_NAME: StitchLabOS
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Checkout Mainsail StitchLAB branch
+        run: |
+          cd mainsail
+          git fetch --all
+          git checkout stitchlabos/v2.17.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mainsail/package-lock.json
+
+      - name: Build Mainsail
+        run: |
+          cd mainsail
+          npm ci
+          npm run build
+          mkdir -p ../stitchlabos/image/src/modules/mainsail/filesystem/home/pi/mainsail
+          cp -r dist/* ../stitchlabos/image/src/modules/mainsail/filesystem/home/pi/mainsail/
+
+      - name: Prepare TurtleStitch
+        run: |
+          mkdir -p stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch
+          cp -r turtlestitch/* stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/ 2>/dev/null || true
+          rm -rf stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/.git
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git qemu-user-static binfmt-support p7zip-full xz-utils jq \
+            curl wget coreutils util-linux gawk realpath file \
+            kpartx dosfstools e2fsprogs parted zerofree zip bsdtar
+          sudo modprobe loop
+          echo "loop" | sudo tee /etc/modules-load.d/loop.conf
+
+      - name: Clone CustomPiOS
+        run: |
+          git clone --depth=1 https://github.com/guysoft/CustomPiOS.git ~/CustomPiOS
+
+      - name: Configure CustomPiOS paths
+        run: |
+          cd stitchlabos/image
+          ~/CustomPiOS/src/update-custompios-paths
+
+      - name: Build image
+        run: |
+          cd stitchlabos/image/src
+          sudo bash -x ./build_dist
+        timeout-minutes: 90
+        env:
+          CLEAN: true
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(date +%Y%m%d)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Compress and checksum
+        run: |
+          cd stitchlabos/image/src/workspace
+          IMAGE=$(ls *.img 2>/dev/null | head -1)
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: No .img file found" && exit 1
+          fi
+          NEW_NAME="${DIST_NAME}-${{ steps.version.outputs.version }}.img"
+          mv "$IMAGE" "$NEW_NAME"
+          xz -9 -T0 -v "$NEW_NAME"
+          sha256sum "${NEW_NAME}.xz" > "${NEW_NAME}.xz.sha256"
+          echo "IMAGE_XZ=${NEW_NAME}.xz" >> $GITHUB_ENV
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DIST_NAME }}-${{ steps.version.outputs.version }}
+          path: |
+            stitchlabos/image/src/workspace/*.img.xz
+            stitchlabos/image/src/workspace/*.img.xz.sha256
+          retention-days: 7
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: StitchLabOS ${{ steps.version.outputs.version }}
+          body: |
+            ## StitchLabOS ${{ steps.version.outputs.version }}
+
+            Flash with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) — hostname, WiFi, and SSH can be configured directly in the imager.
+
+            ### Included
+            - Klipper + Moonraker (latest master at build time)
+            - Mainsail v2.17.0 + StitchLAB UI (WiFi Manager, Embroidery Panel, GCode Studio)
+            - TurtleStitch offline editor with Moonraker integration
+            - WiFi Manager with AP fallback (AccessPopup)
+            - Live Jog controller daemon
+          files: |
+            stitchlabos/image/src/workspace/*.img.xz
+            stitchlabos/image/src/workspace/*.img.xz.sha256
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-rc') || contains(steps.version.outputs.version, '-beta') }}
+          generate_release_notes: false
