@@ -74,8 +74,6 @@ jobs:
             CUSTOM_PI_OS_PATH="$GITHUB_WORKSPACE/CustomPiOS/src" \
             bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
         timeout-minutes: 90
-        env:
-          CLEAN: true
 
       - name: Get version
         id: version
