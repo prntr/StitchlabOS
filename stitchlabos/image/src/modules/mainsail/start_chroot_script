@@ -11,11 +11,9 @@ echo "=== StitchLabOS: Installing Mainsail ==="
 apt-get update
 apt-get install -y nginx
 
-# Unpack nginx configuration
+# Unpack nginx config and pre-built Mainsail dist files (copied by CI before chroot)
 unpack /filesystem/etc /etc root
-
-# Create mainsail directory (will be populated by CI build or during first boot)
-sudo -u pi mkdir -p ${MAINSAIL_DIR}
+unpack /filesystem/home/pi /home/pi pi
 
 # Clone mainsail-config
 echo "Cloning mainsail-config..."
@@ -31,8 +29,4 @@ ln -sf ${NGINX_SITES_AVAILABLE}/mainsail ${NGINX_SITES_ENABLED}/mainsail
 # Enable nginx
 systemctl enable nginx
 
-# NOTE: The actual Mainsail dist files should be copied to /home/pi/mainsail/
-# during the CI build process. This module sets up nginx to serve them.
-
 echo "=== Mainsail module complete ==="
-echo "NOTE: Mainsail dist files should be pre-built and included in the image"

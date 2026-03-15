@@ -62,9 +62,10 @@ jobs:
           wget -q --show-progress \
             "https://downloads.raspberrypi.com/raspios_lite_arm64_latest" \
             -O stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz
-          echo "Extracting..."
-          xz -d stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz
-          ls -lh stitchlabos/image/src/workspace/*.img
+          ls -lh stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz
+          # Tell CustomPiOS where to find the base image via config.local
+          echo "export BASE_ZIP_IMG=\"$GITHUB_WORKSPACE/stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz\"" \
+            > stitchlabos/image/src/config.local
 
       - name: Build image
         run: |
