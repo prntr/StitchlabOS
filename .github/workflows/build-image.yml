@@ -46,8 +46,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             git qemu-user-static binfmt-support p7zip-full xz-utils jq \
-            curl wget coreutils util-linux gawk realpath file \
-            kpartx dosfstools e2fsprogs parted zerofree zip bsdtar
+            curl wget coreutils util-linux gawk file \
+            kpartx dosfstools e2fsprogs parted zerofree zip libarchive-tools
           sudo modprobe loop
           echo "loop" | sudo tee /etc/modules-load.d/loop.conf
 
