@@ -55,13 +55,24 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/guysoft/CustomPiOS.git
 
+      - name: Download Raspberry Pi OS base image
+        run: |
+          mkdir -p stitchlabos/image/src/workspace
+          echo "Fetching latest Raspberry Pi OS Lite arm64..."
+          wget -q --show-progress \
+            "https://downloads.raspberrypi.com/raspios_lite_arm64_latest" \
+            -O stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz
+          echo "Extracting..."
+          xz -d stitchlabos/image/src/workspace/raspios_lite_arm64.img.xz
+          ls -lh stitchlabos/image/src/workspace/*.img
+
       - name: Build image
         run: |
           sudo modprobe loop
           sudo \
             DIST_PATH="$GITHUB_WORKSPACE/stitchlabos/image/src" \
             CUSTOM_PI_OS_PATH="$GITHUB_WORKSPACE/CustomPiOS/src" \
-            bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build" -d
+            bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
         timeout-minutes: 90
         env:
           CLEAN: true
