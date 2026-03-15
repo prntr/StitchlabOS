@@ -1,0 +1,7 @@
+# Mainsail Module Configuration
+# Installs Mainsail web UI and nginx
+
+export MAINSAIL_DIR="/home/pi/mainsail"
+export MAINSAIL_CONFIG_DIR="/home/pi/mainsail-config"
+export NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
+export NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"

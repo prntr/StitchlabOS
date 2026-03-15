@@ -41,8 +41,6 @@ virtual-klipper-printer/mjpg_streamer_images/
 # Internal planning docs (not for version control)
 Reports&Plans/
 
-# Nested git repos are tracked separately
-mainsail/
-turtlestitch/
+# Standalone nested git repo (not a submodule)
 virtual-klipper-printer/
 

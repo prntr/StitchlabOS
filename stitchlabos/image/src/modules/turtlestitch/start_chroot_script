@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# StitchLabOS - TurtleStitch Module
+# Installs TurtleStitch offline web editor
+
+set -e
+source /common.sh
+
+echo "=== StitchLabOS: Installing TurtleStitch ==="
+
+# Unpack nginx configuration
+unpack /filesystem/etc /etc root
+
+# Create turtlestitch directory (will be populated by CI build)
+sudo -u pi mkdir -p ${TURTLESTITCH_DIR}
+
+# Enable turtlestitch site
+ln -sf /etc/nginx/sites-available/turtlestitch /etc/nginx/sites-enabled/turtlestitch
+
+# Create project directory for TurtleStitch files
+sudo -u pi mkdir -p /home/pi/printer_data/gcodes/turtlestitch_projects
+
+# NOTE: The TurtleStitch files should be copied to /home/pi/turtlestitch/
+# during the CI build process from the turtlestitch submodule.
+
+echo "=== TurtleStitch module complete ==="
+echo "NOTE: TurtleStitch files should be pre-copied from submodule during build"

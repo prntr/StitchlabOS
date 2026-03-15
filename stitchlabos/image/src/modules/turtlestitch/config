@@ -1,0 +1,5 @@
+# TurtleStitch Module Configuration
+# Installs TurtleStitch offline web editor
+
+export TURTLESTITCH_DIR="/home/pi/turtlestitch"
+export TURTLESTITCH_PORT="3000"

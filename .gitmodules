@@ -1,0 +1,8 @@
+[submodule "mainsail"]
+	path = mainsail
+	url = https://github.com/prntr/mainsail.git
+	branch = stitchlabos/v2.17.0
+[submodule "turtlestitch"]
+	path = turtlestitch
+	url = https://github.com/prntr/turtlestitch.git
+	branch = master
