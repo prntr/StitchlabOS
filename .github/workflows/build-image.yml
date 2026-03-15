@@ -54,19 +54,12 @@ jobs:
       - name: Clone CustomPiOS
         run: |
           git clone --depth=1 https://github.com/guysoft/CustomPiOS.git
-          echo "--- CustomPiOS/src/ contents ---"
-          ls -la CustomPiOS/src/
-
-      - name: Configure CustomPiOS paths
-        run: |
-          cd stitchlabos/image
-          ../../CustomPiOS/src/update-custompios-paths
 
       - name: Build image
         run: |
           sudo modprobe loop
           cd stitchlabos/image/src
-          sudo bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build_dist"
+          sudo bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
         timeout-minutes: 90
         env:
           CLEAN: true
