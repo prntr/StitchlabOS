@@ -59,13 +59,12 @@ jobs:
         run: |
           cd stitchlabos/image
           ../../CustomPiOS/src/update-custompios-paths
-          echo "--- src/ contents after update-custompios-paths ---"
-          ls -la src/
 
       - name: Build image
         run: |
+          sudo modprobe loop
           cd stitchlabos/image/src
-          sudo bash -x ./build_dist
+          sudo bash -x ../../CustomPiOS/src/build_dist
         timeout-minutes: 90
         env:
           CLEAN: true
