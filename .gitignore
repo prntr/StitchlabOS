@@ -39,6 +39,9 @@ virtual-klipper-printer/mjpg_streamer_images/
 **/.piolibdeps/
 **/.clangd/
 
+# Internal planning docs (not for version control)
+Reports&Plans/
+
 # Nested git repos are tracked separately
 mainsail/
 turtlestitch/

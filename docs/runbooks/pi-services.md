@@ -1,45 +1,47 @@
 # Runbook: Pi Services
 
-This runbook documents services expected on the dev Pi target (`pi@stitchlabdev.local`).
+> Service management for `pi@stitchlabdev.local`. See [05-configuration.md](../05-configuration.md) for ports/endpoints.
 
-## Core services
+## Core Services
 
-- `nginx`
-- `moonraker`
-- `klipper`
+| Service | Purpose |
+|---------|---------|
+| `nginx` | Web server for Mainsail + TurtleStitch |
+| `moonraker` | Klipper API |
+| `klipper` | Motion control |
 
-## StitchLAB services (optional)
+```bash
+systemctl status nginx moonraker klipper
+```
 
-### live_jogd
+## live_jogd
 
-- Purpose: bridge StitchLabDongle (USB) to Moonraker (HTTP).
-- Service unit: installed from `KlipperLiveControl/live_jogd/live_jogd.service`.
-- Notes: enables dongle WiFi pre-start and disables it on stop.
-
-Commands:
+Bridges StitchLabDongle (USB) to Moonraker (HTTP).
 
 ```bash
 systemctl status live_jogd
 journalctl -u live_jogd -f
 ```
 
-### TurtleStitch offline server
+Install: `KlipperLiveControl/live_jogd/live_jogd.service`
 
-The workspace includes `turtlestitch-server.py` (port `3000`, directory `/home/pi/turtlestitch`).
-Whether it is managed by systemd on the Pi is currently unknown and should be documented after verification.
+## TurtleStitch Offline
 
-## Moonraker extension: WiFi manager
+Nginx serves `/home/pi/turtlestitch` on `:3000`.
 
-StitchLAB provides a Moonraker component for WiFi management (NetworkManager/nmcli based).
+```bash
+curl -I http://localhost:3000
+ss -ltnp | grep ':3000'
+```
 
-- Source: `stitchlabos/config/moonraker/wifi_manager.py`
-- Deployment: `stitchlabos/scripts/rpi/deploy_wifi_manager.sh`
-- On-Pi scripts written to: `/home/pi/printer_data/scripts/wifi_*.sh`
+Config: `/etc/nginx/sites-available/turtlestitch`
 
-Validation on Pi:
+Note: `turtlestitch.service` exists but is disabled (nginx owns port).
+
+## WiFi Manager
 
 ```bash
 curl http://localhost:7125/server/wifi/status
-curl http://localhost:7125/server/wifi/scan
-curl http://localhost:7125/server/wifi/profiles
 ```
+
+Deploy: `./stitchlabos/scripts/rpi/deploy_wifi_manager.sh --host pi@stitchlabdev.local`

@@ -1,22 +1,50 @@
 # Troubleshooting
 
-## UI doesn’t connect to Moonraker
+> Common issues and solutions. See [05-configuration.md](05-configuration.md) for port/endpoint reference.
 
-- Verify Moonraker is reachable: `curl http://localhost:7125/printer/info`
-- Check `mainsail/public/config.json`
-- Beware service worker caching (hard refresh, or clear site data)
+## Moonraker Connection
 
-## Controller menu shows disconnected / WS errors
+| Symptom | Check |
+|---------|-------|
+| UI doesn't connect | `curl http://localhost:7125/printer/info` |
+| Wrong instance | `mainsail/public/config.json` |
+| Changes don't apply | Service worker cache - hard refresh or clear site data |
 
-- Expected today: the UI side expects a WebSocket on `:7150` but `live_jogd` doesn’t provide it yet.
-- Use the CLI tooling from `KlipperLiveControl/live_jogd/dongle_api.py`.
+## Controller Menu / WebSocket
 
-## G-Code Studio viewer confusion (2D)
+| Symptom | Cause |
+|---------|-------|
+| Shows disconnected | Expected: WebSocket :7150 not implemented yet |
+| WS errors in console | Use CLI: `KlipperLiveControl/live_jogd/dongle_api.py` |
 
-Current deployed viewer is **Paper.js** (`mainsail/src/components/gcodestudio/GCodeStudio2D.vue`).
-The Handibot canvas viewer (`mainsail/src/components/gcodestudio/GCodeStudio2DViewer.vue`) is legacy and not routed.
+## Embroidery Panel
 
-If `/home/pi/mainsail/lib/gcode2dviewer/` exists on the Pi, that does not mean it is active.
-Check for `gcode2dviewer.js` references in the built assets if you need to confirm.
+| Symptom | Fix |
+|---------|-----|
+| Panel not showing | Enable in Settings > Dashboard |
+| Buttons don't work | Check browser console (F12) |
+| Macros fail | `journalctl -u klipper -f` |
 
-See [Components: G-Code Studio](components/gcode-studio.md) for details and verification commands.
+## Controller Hardware
+
+```bash
+# Check dongle device
+ls -la /dev/stitchlab-dongle
+
+# Check live_jogd status
+sudo systemctl status live_jogd
+journalctl -u live_jogd -f
+
+# Query dongle directly
+python dongle_api.py --query status
+```
+
+## G-Code Studio Viewer
+
+Current viewer: **Paper.js** (`GCodeStudio2D.vue`)
+
+Legacy Handibot viewer (`GCodeStudio2DViewer.vue`) is not routed.
+
+If `/home/pi/mainsail/lib/gcode2dviewer/` exists, check built assets for actual references.
+
+See [Components: G-Code Studio](components/gcode-studio.md) for verification.

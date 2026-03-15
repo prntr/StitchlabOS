@@ -34,6 +34,36 @@ scp "$REPO_ROOT/config/moonraker/wifi_manager.py" "$HOST:$MOONRAKER_PATH/"
 echo "Uploading WiFi scripts..."
 ssh "$HOST" "mkdir -p $SCRIPTS_PATH"
 
+# 2b. AP-mode DNS helpers (NetworkManager shared mode)
+# Note: macOS treats `.local` as mDNS (multicast), so a unicast DNS override
+# is not reliable there. We provide `stitchlabdev.lan` as the stable AP name.
+echo "Configuring AP-mode DNS (dnsmasq-shared)..."
+ssh "$HOST" "sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d"
+ssh "$HOST" "cat | sudo tee /etc/NetworkManager/dnsmasq-shared.d/stitchlab-ap.conf > /dev/null" << 'CONF'
+# StitchLab AP DNS overrides for NetworkManager `ipv4.method shared`
+# AP IP is fixed by the AccessPopup profile (default: 192.168.50.5)
+address=/stitchlabdev.lan/192.168.50.5
+address=/stitchlabdev/192.168.50.5
+# Included for non-macOS clients; macOS resolves `.local` via mDNS.
+address=/stitchlabdev.local/192.168.50.5
+CONF
+
+# 2c. Avahi (mDNS) configuration
+# Some clients cache/choose the first mDNS A record they see. If the Pi has more
+# than one interface/address, Avahi may advertise multiple A records for
+# `stitchlabdev.local`. In AP mode that can lead to clients resolving an address
+# that is not reachable from the AP subnet.
+#
+# Fix: only advertise on wlan0 (both WiFi + AP use wlan0).
+echo "Configuring Avahi (mDNS) to advertise on wlan0 only..."
+ssh "$HOST" "sudo grep -q '^allow-interfaces=' /etc/avahi/avahi-daemon.conf \
+    && sudo sed -i 's/^allow-interfaces=.*/allow-interfaces=wlan0/' /etc/avahi/avahi-daemon.conf \
+    || sudo sed -i '/^use-ipv6=yes/a allow-interfaces=wlan0' /etc/avahi/avahi-daemon.conf"
+
+# Ensure reflector is enabled (helps in some AP setups)
+ssh "$HOST" "sudo sed -i 's/^#enable-reflector=no/enable-reflector=yes/' /etc/avahi/avahi-daemon.conf"
+ssh "$HOST" "sudo systemctl restart avahi-daemon"
+
 # Create wifi_status.sh
 ssh "$HOST" "cat > $SCRIPTS_PATH/wifi_status.sh" << 'SCRIPT'
 #!/bin/bash

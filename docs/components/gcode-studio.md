@@ -1,43 +1,38 @@
 # Component: G-Code Studio
 
-## Why this doc exists
+> Two 2D implementations exist in the repo. This page records which is deployed.
 
-There are **two different 2D implementations** in the repository.
-This page records which one is currently deployed and how to verify it.
+## Current Status
 
-## Current status (verified on dev Pi)
+| Item | Value |
+|------|-------|
+| Deployed | Paper.js: `GCodeStudio2D.vue` |
+| Route | `pages/GCodeStudio.vue` mounts `GCodeStudio2D` |
+| Legacy | Handibot viewer in tree but **not routed** |
 
-- **Deployed viewer:** Paper.js-based `mainsail/src/components/gcodestudio/GCodeStudio2D.vue`
-- **Route wiring:** `mainsail/src/pages/GCodeStudio.vue` mounts `GCodeStudio2D`
-- The Handibot canvas viewer remains in tree but is **not** routed
-- `/home/pi/mainsail/lib/gcode2dviewer/` may exist on the Pi, but the current bundle does not reference it
+## Implementations
 
-## Implementations in tree
-
-### Current: Paper.js based viewer
+### Current: Paper.js
 
 - Component: `mainsail/src/components/gcodestudio/GCodeStudio2D.vue`
-- Notes: see `mainsail/src/components/gcodestudio/AGENTS.md`
+- Docs:
+  - [agents-notes.md](gcode-studio/agents-notes.md)
+  - [repositioning-feature-plan.md](gcode-studio/repositioning-feature-plan.md)
 
-### Legacy: Handibot canvas viewer
+### Legacy: Handibot
 
 - Component: `mainsail/src/components/gcodestudio/GCodeStudio2DViewer.vue`
-- Library: Handibot-GCode2DViewer in `mainsail/public/lib/gcode2dviewer/` (deployed to Pi in earlier work)
+- Library: `mainsail/public/lib/gcode2dviewer/`
+- Status: Not routed, not deployed
 
-## How to verify on the Pi
-
-The Paper.js build includes PaperScope and does **not** include the Handibot script path.
-Run from your local machine:
+## Verify on Pi
 
 ```bash
-ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'PaperScope' /home/pi/mainsail/assets | head -n 1"
-ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'gcode2dviewer.js' /home/pi/mainsail/assets | head -n 1"
+# Paper.js = current (should match)
+ssh pi@stitchlabdev.local "grep -l 'PaperScope' /home/pi/mainsail/assets/*"
+
+# Handibot = legacy (should NOT match)
+ssh pi@stitchlabdev.local "grep -l 'gcode2dviewer.js' /home/pi/mainsail/assets/*"
 ```
 
-Notes:
-- `gcodetogeometry.min.js` is used as a parser by the Paper.js viewer, so its presence alone does not indicate the Handibot viewer is active.
-- `gcode2dviewer.js` references in the built assets are the indicator for the Handibot viewer.
-
-## Dates
-
-Some docs list different dates for the same integration. Canonical date should be the actual deployment date.
+Note: `gcodetogeometry.min.js` is shared by both viewers (parser).

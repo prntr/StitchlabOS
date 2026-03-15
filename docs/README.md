@@ -1,32 +1,34 @@
 # StitchLAB Documentation
 
-This folder contains the **StitchLAB integration documentation** (the glue between the projects in this workspace).
+> Integration docs for the StitchLAB workspace. Upstream project docs live in their repos.
 
-It intentionally does **not** replace upstream docs inside:
-- `mainsail/` (Mainsail fork)
-- `virtual-klipper-printer/` (simulator)
-- `turtlestitch/` (TurtleStitch)
-- `KlipperLiveControl/` (controller/dongle firmware + `live_jogd` daemon)
+## Start Here
 
-If you are new here, start with:
-- [Onboarding](01-onboarding.md)
-- [Quickstart (Local)](03-quickstart-local.md)
-- [Quickstart (Dev Pi)](04-quickstart-pi.md)
+- [01 Onboarding](01-onboarding.md) - What's here
+- [03 Quickstart (Local)](03-quickstart-local.md) - Dev with simulator
+- [04 Quickstart (Dev Pi)](04-quickstart-pi.md) - Deploy to Pi
 
-## Index
+## Reference
 
-- [01 Onboarding](01-onboarding.md)
-- [02 Architecture](02-architecture.md)
-- [03 Quickstart (Local)](03-quickstart-local.md)
-- [04 Quickstart (Dev Pi)](04-quickstart-pi.md)
-- [05 Configuration & Ports](05-configuration.md)
-- [06 Troubleshooting](06-troubleshooting.md)
-- [07 Development Guidelines](07-development-guidelines.md)
-- [Runbooks: Pi Services](runbooks/pi-services.md)
-- [Components: G-Code Studio](components/gcode-studio.md)
-- [References (External)](references/external.md)
+- [02 Architecture](02-architecture.md) - System diagram, components, status
+- [05 Configuration](05-configuration.md) - Ports, endpoints, macros
+- [06 Troubleshooting](06-troubleshooting.md) - Common issues
+- [07 Development Guidelines](07-development-guidelines.md) - Coding standards
+- [08 Image Building](08-image-building.md) - Build distributable images
 
-## Legacy notes (historical, not source of truth)
+## Components
 
-- [G-Code Studio Handibot deployment summary](../DEPLOYMENT_SUMMARY.md)
-- [G-Code Studio Handibot implementation notes](../GCODE_STUDIO_2D_IMPLEMENTATION.md)
+- [G-Code Studio](components/gcode-studio.md) - 2D viewer status
+  - [Agent Notes](components/gcode-studio/agents-notes.md)
+  - [Repositioning Plan](components/gcode-studio/repositioning-feature-plan.md)
+- [TurtleStitch](components/turtlestitch.md) - Project file management
+- [TurtleStitch](components/turtlestitch.md) - Offline app + hosting
+  - [Agent Notes](components/turtlestitch/agents-notes.md)
+
+## Operations
+
+- [Runbook: Pi Services](runbooks/pi-services.md) - Service management
+
+## External
+
+- [External References](references/external.md) - Upstream docs

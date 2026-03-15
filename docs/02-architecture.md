@@ -1,46 +1,82 @@
 # Architecture
 
-## System overview
+> System composition, ownership boundaries, and component status.
 
-The StitchLAB system is a composition of:
+## System Diagram
 
-- Mainsail UI (browser)
-- Moonraker API (HTTP/WebSocket)
-- Klipper firmware (host + MCU)
-- StitchLAB extensions:
-  - Embroidery macros (`embroidery_macros.cfg`)
-  - Optional live control (controller + dongle + `live_jogd`)
-  - G-Code Studio features for embroidery/plotter workflows
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         MAINSAIL FRONTEND                               │
+│                                                                         │
+│  ┌──────────────────────────┐    ┌────────────────────────────────────┐ │
+│  │  EmbroideryControlPanel  │    │  TheControllerMenu                 │ │
+│  │  • Needle Toggle         │    │  • Dongle status                   │ │
+│  │  • Stitch / Lock Stitch  │    │  • Controller pairing              │ │
+│  │  • Zero Position         │    │  • WiFi controls                   │ │
+│  └────────────┬─────────────┘    └─────────────────┬──────────────────┘ │
+│               │ G-code via Moonraker               │ WebSocket :7150    │
+└───────────────┼────────────────────────────────────┼────────────────────┘
+                │                                    │ (not yet implemented)
+                ▼                                    ▼
+┌───────────────────────────┐        ┌────────────────────────────────────┐
+│  Moonraker (Port 7125)    │◄───────│  live_jogd.py                      │
+│  Klipper                  │  HTTP  │  USB Serial ↔ Binary Protocol      │ 
+│  embroidery_macros.cfg    │        └─────────────────┬──────────────────┘
+└───────────────────────────┘                          │
+                                                       ▼
+                                     ┌────────────────────────────────────┐
+                                     │  StitchLabDongle (ESP32-C3)        │
+                                     │  ESP-NOW ↔ StitchLabController     │
+                                     └────────────────────────────────────┘
+```
 
-## Ownership boundaries
+## Ownership Boundaries
 
-To keep the project maintainable, treat these as separate layers:
+| Layer | Components | Docs Location |
+|-------|------------|---------------|
+| Upstream | Mainsail, Klipper, Moonraker, TurtleStitch | Nested repo READMEs |
+| StitchLAB glue | Ports, config, Pi runbooks, integration | `docs/` (this folder) |
+| StitchLAB code | UI panels, macros, WiFi manager, live control | `stitchlabos/`, `mainsail/` fork |
 
-- **Upstream**: Mainsail, Klipper, Moonraker, TurtleStitch
-- **StitchLAB glue** (this workspace documentation):
-  - How the pieces connect
-  - Ports and configuration
-  - Pi runbooks
-  - StitchLAB-specific UI panels and macros
+## Needle Position Model
 
-## StitchLAB-owned building blocks
+```
+1 full handwheel rotation = 5mm Z travel = 1 complete stitch
 
-- `stitchlabos/`
-  - Klipper macros (needle model, stitch commands)
-  - Moonraker component(s), notably WiFi management
-  - Deployment scripts to keep the Pi reproducible (no one-off SSH edits)
+Z=0.0mm  → Needle UP (0°)     - After homing
+Z=2.5mm  → Needle DOWN (180°) - Needle in fabric
+Z=5.0mm  → Needle UP (360°)   - 1 stitch complete
+Z=7.5mm  → Needle DOWN
+Z=10.0mm → Needle UP          - 2 stitches complete
+```
 
-- Mainsail fork additions
-  - Embroidery UI controls/panels
-  - WiFi + controller menu integration
-  - G-Code Studio enhancements for embroidery workflows
+Macros use `G92` to hide physical Z movement from the logical position.
 
-- Pi services
-  - `turtlestitch.service` for offline TurtleStitch serving (plus CORS)
-  - `live_jogd` for dongle/controller bridging (WS planned but not implemented)
+## StitchLAB Building Blocks
 
-## Important concept: Klipper coordinate systems
+| Block | Location | Purpose |
+|-------|----------|---------|
+| Klipper macros | `stitchlabos/config/klipper/embroidery_macros.cfg` | Needle model, stitch commands |
+| WiFi manager | `stitchlabos/config/moonraker/wifi_manager.py` | Moonraker WiFi API extension |
+| Deploy scripts | `stitchlabos/scripts/rpi/` | Reproducible Pi setup |
+| Embroidery UI | `mainsail/src/components/panels/EmbroideryControlPanel.vue` | Web controls |
+| Controller menu | `mainsail/src/components/TheControllerMenu.vue` | Dongle/WiFi UI |
+| G-Code Studio | `mainsail/src/components/gcodestudio/` | Embroidery visualization |
 
-Embroidery macros and UI features rely heavily on Klipper’s handling of coordinate systems, especially the effect of `G92`.
+## Integration Status
 
-Reference: see [Klipper Code Overview: Coordinate Systems](https://www.klipper3d.org/Code_Overview.html#coordinate-systems).
+| Component | Status | Notes |
+|-----------|--------|-------|
+| EmbroideryControlPanel | Done | Works via Moonraker |
+| Klipper Macros | Done | All macros functional |
+| live_jogd daemon | Done | Serial + HTTP working |
+| StitchLabDongle | Done | ESP-NOW + Serial API |
+| StitchLabController | Done | LVGL UI + joystick |
+| TheControllerMenu UI | Partial | UI done, needs WebSocket backend |
+| Browser ↔ live_jogd | Missing | WebSocket :7150 not implemented |
+
+## Klipper Coordinate Systems
+
+Embroidery macros rely on Klipper's handling of coordinate systems, especially `G92`.
+
+Reference: [Klipper Code Overview: Coordinate Systems](https://www.klipper3d.org/Code_Overview.html#coordinate-systems)

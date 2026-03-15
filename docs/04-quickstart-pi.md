@@ -1,96 +1,42 @@
-# Quickstart (Dev Pi: stitchlabdev.local)
+# Quickstart (Dev Pi)
 
-Target: `pi@stitchlabdev.local`
+> Deploy UI and validate services on `pi@stitchlabdev.local`.
 
-This doc is a **runbook** for deploying the UI and validating services on the dev Pi.
-
-## Deploy UI build
-
-From `mainsail/`:
+## Deploy UI
 
 ```bash
+cd mainsail
 npm install
 npm run build
 rsync -avz --delete dist/ pi@stitchlabdev.local:/home/pi/mainsail/
+ssh pi@stitchlabdev.local "sudo systemctl restart nginx"
 ```
 
-Then on the Pi:
+## Validate Core Services
 
 ```bash
-sudo systemctl restart nginx
+ssh pi@stitchlabdev.local "systemctl status nginx moonraker klipper"
+curl http://stitchlabdev.local:7125/printer/info
 ```
 
-## Validate core services
+## Validate StitchLAB Extras
 
-On the Pi:
+See [Runbook: Pi Services](runbooks/pi-services.md) for detailed validation commands.
+
+Quick checks:
 
 ```bash
-systemctl status nginx
-systemctl status moonraker
-systemctl status klipper
+# G-Code Studio viewer (Paper.js = current)
+ssh pi@stitchlabdev.local "grep -l 'PaperScope' /home/pi/mainsail/assets/*"
+
+# live_jogd
+ssh pi@stitchlabdev.local "systemctl status live_jogd"
+
+# WiFi manager
+curl http://stitchlabdev.local:7125/server/wifi/status
+
+# TurtleStitch
+curl -I http://stitchlabdev.local:3000
 ```
 
-Moonraker quick check:
-
-```bash
-curl http://localhost:7125/printer/info
-```
-
-## Validate StitchLAB extras (if installed)
-
-### G-Code Studio viewer (deployed build check)
-
-Confirm which 2D viewer is active in the deployed bundle:
-
-```bash
-ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'PaperScope' /home/pi/mainsail/assets | head -n 1"
-ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'gcode2dviewer.js' /home/pi/mainsail/assets | head -n 1"
-```
-
-Interpretation:
-
-### live control daemon
-### G-Code Studio viewer (deployed build check)
-
-Confirm which 2D viewer is active in the deployed bundle:
-
-```bash
-ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'PaperScope' /home/pi/mainsail/assets | head -n 1"
-ssh pi@stitchlabdev.local "grep -R --line-number --fixed-strings 'gcode2dviewer.js' /home/pi/mainsail/assets | head -n 1"
-```
-
-Interpretation:
-- If `PaperScope` appears and `gcode2dviewer.js` does not, the Paper.js viewer is deployed.
-- If `gcode2dviewer.js` appears, the legacy Handibot viewer is deployed.
-
-```bash
-systemctl status live_jogd
-journalctl -u live_jogd -n 100 --no-pager
-```
-
-Note: the UI expects a WebSocket control channel on `:7150`, but in the current codebase this is **not implemented** in `live_jogd` yet; management is CLI-only.
-
-### WiFi manager (Moonraker component)
-
-If you deploy the StitchLAB WiFi manager, Moonraker exposes endpoints like:
-
-```bash
-curl http://localhost:7125/server/wifi/status
-```
-
-Deployment is scripted via:
-
-```bash
-./stitchlabos/scripts/rpi/deploy_wifi_manager.sh --host pi@stitchlabdev.local
-```
-
-### TurtleStitch offline server
-
-The workspace includes `turtlestitch-server.py` which serves TurtleStitch from `/home/pi/turtlestitch` on port `3000`.
-How that is exposed via nginx on the Pi still needs to be documented/confirmed.
-
-## Known unknowns (needs confirmation on Pi)
-
-- nginx site configuration path and reverse-proxy rules
-- whether TurtleStitch is reverse proxied under the same host
-- Moonraker `cors_domains` and `trusted_clients` policy in the dev setup
+See [05-configuration.md](05-configuration.md) for all ports and endpoints.

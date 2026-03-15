@@ -1,44 +1,34 @@
 # Onboarding
 
-## What is in this workspace?
+> What's in this workspace and how to get started.
 
-This workspace combines several projects that together form the StitchLAB system:
+## Workspace Projects
 
-- **UI**: `mainsail/` (Vue 2 + Vite + Vuetify). This is the primary UI people use.
-- **Simulator**: `virtual-klipper-printer/` (Dockerized Moonraker/Klipper + dummy webcam).
-- **TurtleStitch**: `turtlestitch/` (Snap!/TurtleStitch tooling and offline assets).
-- **StitchlabOS**: `stitchlabos/` (OS/config/scripts for the target machine / dev Pi target).
-- **Live control**: `KlipperLiveControl/` (ESP32 controller & dongle, plus `live_jogd/` daemon).
+| Project | Path | Purpose |
+|---------|------|---------|
+| UI | `mainsail/` | Vue 2 + Vite + Vuetify frontend |
+| Simulator | `virtual-klipper-printer/` | Dockerized Moonraker/Klipper |
+| TurtleStitch | `turtlestitch/` | Snap!/TurtleStitch tooling |
+| StitchlabOS | `stitchlabos/` | OS/config/scripts for Pi |
+| Image Build | `stitchlabos/image/` | CustomPiOS image tooling |
+| Live control | `KlipperLiveControl/` | ESP32 controller + daemon |
 
-## What is “ours” (StitchLAB-specific)
+## StitchLAB Extensions
 
-The following are StitchLAB-owned extensions/integration (not upstream projects):
+| Feature | UI | Backend |
+|---------|-----|---------|
+| `EmbroideryControlPanel.vue` | `embroidery_macros.cfg` |
+| `TheControllerMenu.vue` | `wifi_manager.py` |
+| TurtleStitch offline | Nav link | nginx on Pi `:3000` |
 
-- **Needle control UI + macros**
-	- UI panel: `mainsail/src/components/panels/EmbroideryControlPanel.vue`
-	- Klipper macros: `stitchlabos/config/klipper/embroidery_macros.cfg`
+See [02-architecture.md](02-architecture.md) for full component locations.
 
-- **WiFi management (Moonraker component + scripts)**
-	- Moonraker component: `stitchlabos/config/moonraker/wifi_manager.py`
-	- Deploy helper: `stitchlabos/scripts/rpi/deploy_wifi_manager.sh`
-	- UI entry point (status/controls): `mainsail/src/components/TheControllerMenu.vue`
+## Development Modes
 
-- **TurtleStitch offline on the Pi + G-code export path**
-	- HTTP server script: `turtlestitch-server.py` (serves `/home/pi/turtlestitch` on port `3000`)
-	- systemd unit: `turtlestitch.service`
-	- Embroidery/plotter G-code is uploaded/printed via Moonraker from within the UI
-
-## Read this first
-
-There are two common development modes:
-
-1) **Local dev mode (recommended)**
-- Run `mainsail` dev server.
-- Run simulator (`virtual-klipper-printer`) locally.
-
-2) **Dev Pi mode (`pi@stitchlabdev.local`)**
-- UI build is deployed to nginx webroot on the Pi.
-- Services (Moonraker/Klipper/nginx + live control daemon + optionally TurtleStitch server) run on the Pi.
+| Mode | UI | Backend |
+|------|-----|---------|
+| Local | `npm run serve` | Docker simulator |
+| Dev Pi | rsync to Pi | Pi services |
 
 Pick one:
 - [Quickstart (Local)](03-quickstart-local.md)
