@@ -33,15 +33,15 @@ echo "Cloning Moonraker..."
 sudo -u pi git clone --depth=1 ${MOONRAKER_REPO} ${MOONRAKER_DIR}
 rm -rf ${MOONRAKER_DIR}/docs
 
-# Create Klipper virtual environment
+# Create Klipper virtual environment (use virtualenv, more reliable on Debian)
 echo "Setting up Klipper virtualenv..."
-sudo -u pi python3 -m venv ${KLIPPY_ENV}
+sudo -u pi virtualenv -p python3 ${KLIPPY_ENV}
 sudo -u pi ${KLIPPY_ENV}/bin/pip install --upgrade pip
 sudo -u pi ${KLIPPY_ENV}/bin/pip install -r ${KLIPPER_DIR}/scripts/klippy-requirements.txt
 
 # Create Moonraker virtual environment
 echo "Setting up Moonraker virtualenv..."
-sudo -u pi python3 -m venv ${MOONRAKER_ENV}
+sudo -u pi virtualenv -p python3 ${MOONRAKER_ENV}
 sudo -u pi ${MOONRAKER_ENV}/bin/pip install --upgrade pip
 sudo -u pi ${MOONRAKER_ENV}/bin/pip install -r ${MOONRAKER_DIR}/scripts/moonraker-requirements.txt
 
