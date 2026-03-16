@@ -15,9 +15,9 @@ apt-get install -y python3-serial
 unpack /filesystem/home/pi /home/pi pi
 unpack /filesystem/etc /etc root
 
-# Create Python virtual environment
+# Create Python virtual environment (use virtualenv, more reliable on Debian Trixie)
 cd ${LIVE_JOGD_DIR}
-sudo -u pi python3 -m venv venv
+sudo -u pi virtualenv -p python3 venv
 sudo -u pi ${LIVE_JOGD_DIR}/venv/bin/pip install --upgrade pip
 sudo -u pi ${LIVE_JOGD_DIR}/venv/bin/pip install -r requirements.txt
 
