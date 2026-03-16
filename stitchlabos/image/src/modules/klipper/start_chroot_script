@@ -13,10 +13,11 @@ apt-get install -y \
     python3 python3-pip python3-venv \
     git wget curl \
     build-essential libffi-dev libncurses-dev \
-    avrdude gcc-arm-none-eabi stm32flash libnewlib-arm-none-eabi \
     virtualenv python3-dev libopenjp2-7 python3-libgpiod \
     liblmdb-dev libsodium-dev zlib1g-dev libjpeg-dev \
     packagekit wireless-tools
+# Note: gcc-arm-none-eabi, avrdude, stm32flash, libnewlib-arm-none-eabi omitted —
+# firmware compilation is done on a dev machine, not on the Pi at runtime.
 
 # Create pi user if not exists (should already exist on Pi OS)
 id -u pi &>/dev/null || useradd -m -s /bin/bash pi
