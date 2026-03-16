@@ -4,19 +4,24 @@
 
 ## Overview
 
-StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS), a framework for creating custom Raspberry Pi distributions. The image includes all StitchLAB components pre-configured.
+StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS) (devel branch) via GitHub Actions. The image includes all StitchLAB components pre-configured and is compatible with Raspberry Pi Imager (hostname/WiFi/SSH configurable at flash time).
 
 **Included Components:**
 
 | Component | Purpose |
 |-----------|---------|
 | Klipper + Moonraker | Motion control and API |
-| Mainsail | Web UI |
+| Mainsail | Web UI (custom StitchLAB fork) |
 | TurtleStitch | Visual programming for embroidery |
 | KIAUH | Klipper management tool |
 | Katapult | MCU bootloader |
 | AccessPopup | WiFi AP fallback mode |
 | live_jogd | USB serial bridge |
+
+## GitHub Repository
+
+- Repo: `https://github.com/prntr/StitchlabOS`
+- Main submodules: `mainsail` → `prntr/mainsail` (branch `stitchlabos/v2.17.0`), `turtlestitch` → `prntr/turtlestitch` (branch `master`)
 
 ## Using Pre-built Images
 
@@ -24,96 +29,119 @@ StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS), 
 
 1. Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
 2. Select **Choose OS → Other general-purpose OS → Use custom**
-3. Enter URL: `https://github.com/stitchlab/stitchlabos/releases/latest/download/StitchLabOS-latest.img.xz`
-4. Configure hostname, WiFi, SSH via Imager settings
+3. Enter URL: `https://github.com/prntr/StitchlabOS/releases/latest/download/StitchLabOS-latest.img.xz`
+4. Configure hostname, WiFi, SSH via Imager settings (works because `KEEP_CLOUDINIT="yes"` and `"init_format": "cloudinit-rpi"` in `os_list.json`)
 5. Flash to SD card
 
 ### Direct Download
 
-Download from [GitHub Releases](https://github.com/stitchlab/stitchlabos/releases).
-
-## Building Locally
-
-### Prerequisites
-
-- Linux system (Ubuntu/Debian recommended)
-- 10GB+ free disk space
-- `sudo` access
-
-### Build Steps
-
-```bash
-# Clone CustomPiOS
-git clone https://github.com/guysoft/CustomPiOS.git
-
-# Update paths
-cd stitchlabos/image
-../../CustomPiOS/src/update-custompios-paths
-
-# Build
-cd src
-sudo bash -x ./build_dist
-```
-
-Output: `src/workspace/StitchLabOS-*.img`
+Download from [GitHub Releases](https://github.com/prntr/StitchlabOS/releases).
 
 ## CI/CD Pipeline
 
-GitHub Actions automatically builds on:
-- Push to `main`
-- Tags (`v*`)
-- Manual dispatch
+GitHub Actions builds on tags (`v*`) and manual dispatch. **Never** on every push to main — builds take ~60-90 minutes.
 
-**Workflow:** [.github/workflows/build.yml](../stitchlabos/image/.github/workflows/build.yml)
+**Workflow:** `.github/workflows/build-image.yml`
 
-Steps:
-1. Build Mainsail from `mainsail/` submodule
-2. Copy TurtleStitch from `turtlestitch/` submodule
-3. Run CustomPiOS build
-4. Compress with xz
-5. Upload artifacts (7-day retention)
-6. Create GitHub Release on tags
+### Build Steps (in order)
+
+1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail` and `prntr/turtlestitch`)
+2. Build Mainsail: `npm ci && npm run build`, copy `dist/` → `modules/mainsail/filesystem/home/pi/mainsail/`
+3. Copy TurtleStitch submodule → `modules/turtlestitch/filesystem/home/pi/turtlestitch/`
+4. Install host dependencies (including `gitpython` for CustomPiOS's `execution_order.py`)
+5. Clone CustomPiOS (`--depth=1`)
+6. Download Raspberry Pi OS Lite arm64 (`.img.xz`) into `stitchlabos/image/src/image-raspberrypiarm64/` — **this exact path is required** by CustomPiOS's `generate_board_config.py` which searches `$DIST_PATH/image-{BOARD}/` for `*.xz` files to set `BASE_ZIP_IMG`
+7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... bash -x .../build`
+8. Compress output with `xz -9`, generate sha256
+9. Upload as artifact (7-day retention)
+10. Create GitHub Release on tags
+
+### Key CustomPiOS API Notes
+
+- **Script name**: `CustomPiOS/src/build` (not `build_dist` — that was renamed)
+- **Entry method**: Must pass `DIST_PATH` and `CUSTOM_PI_OS_PATH` as env vars to the `sudo` call
+- **Base image discovery**: `generate_board_config.py` looks for `*.xz`/`*.zip`/`*.7z` in `$DIST_PATH/image-{BASE_BOARD}/`. Our board is `raspberrypiarm64`, so the download goes into `stitchlabos/image/src/image-raspberrypiarm64/`
+- **`CLEAN` env var**: Do NOT set — it deletes the pre-downloaded base image before building
+- **`-d` flag**: Does NOT exist in the devel branch despite the error message; the "auto-download" feature was never implemented
+
+### Triggering a Build
+
+```bash
+# Trigger manual run
+gh workflow run build-image.yml --repo prntr/StitchlabOS
+
+# Monitor
+gh run list --repo prntr/StitchlabOS --limit 5
+gh run view <RUN_ID> --repo prntr/StitchlabOS
+gh run view <RUN_ID> --repo prntr/StitchlabOS --log-failed
+
+# Tag release (triggers build + GitHub Release)
+git tag v1.0.0 && git push origin v1.0.0
+```
 
 ## Module Structure
 
 ```
-stitchlabos/image/src/modules/
-├── klipper/          # Klipper + Moonraker
-├── kiauh/            # KIAUH tool
-├── katapult/         # Katapult bootloader
-├── accesspopup/      # AP mode scripts
-├── mainsail/         # Web UI + nginx
-├── turtlestitch/     # TurtleStitch + nginx
-├── live-jogd/        # USB serial daemon
-└── stitchlabos/      # Final customizations
+stitchlabos/image/src/
+├── config                          # Main CustomPiOS config (BASE_BOARD, MODULES, etc.)
+├── image-raspberrypiarm64/         # Base image download directory (gitignored)
+├── workspace/                      # Build output (gitignored)
+└── modules/
+    ├── klipper/                    # Klipper + Moonraker + virtualenvs
+    ├── kiauh/                      # KIAUH tool
+    ├── katapult/                   # Katapult bootloader
+    ├── accesspopup/                # AP mode fallback
+    ├── mainsail/                   # nginx config; dist files copied by CI
+    ├── turtlestitch/               # nginx config; files copied by CI
+    ├── live-jogd/                  # USB serial daemon
+    └── stitchlabos/                # Final customizations (wifi_manager, macros, hostname)
 ```
 
 Each module contains:
-- `config` - Module variables
-- `start_chroot_script` - Installation script
-- `filesystem/` - Files to copy to image
+- `config` — exported shell variables (prefixed `MODULENAME_`)
+- `start_chroot_script` — runs inside the ARM chroot; must start with `source /common.sh`
+- `filesystem/` — files unpacked into the image via `unpack /filesystem/... /target owner`
 
 Build order is defined in `src/config`:
-```
+```bash
 MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd,stitchlabos)"
+```
+
+### Module Script Notes
+
+- **virtualenvs**: Use `virtualenv -p python3 <path>` not `python3 -m venv` — `ensurepip` fails on Debian Trixie
+- **git clones**: Always use `--depth=1` to save image space
+- **Klipper/Moonraker**: Remove `docs/` after cloning — large image assets cause "No space left on device"
+- **ARM toolchain** (`gcc-arm-none-eabi`, `libnewlib-arm-none-eabi`, `avrdude`): NOT installed in the image — firmware is compiled on a dev machine, not on the Pi
+- **Mainsail/TurtleStitch**: Both `start_chroot_script` files must call `unpack /filesystem/home/pi /home/pi pi` to copy CI-built assets into the image
+
+## src/config Reference
+
+```bash
+export DIST_NAME="StitchLabOS"
+export DIST_VERSION="0.1.0"
+export BASE_BOARD="raspberrypiarm64"
+export BASE_IMAGE_SECTION="latest"
+export MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd,stitchlabos)"
+export DIST_HOSTNAME="stitchlab"
+export KEEP_CLOUDINIT="yes"   # Required for Pi Imager customization
 ```
 
 ## First Boot
 
-After flashing and booting:
+After flashing:
 
 1. **Hostname**: As configured in Imager (default: `stitchlab`)
-2. **WiFi**: Connects automatically if configured
+2. **WiFi**: Connects automatically if configured in Imager
 3. **SSH**: Enabled with configured credentials
 4. **AP Mode**: If WiFi fails, AccessPopup creates hotspot within 2 minutes
-   - SSID: `AccessPopup`
-   - IP: `192.168.50.5`
+   - SSID: `AccessPopup`, IP: `192.168.50.5`
 
 ### Verify Services
 
 ```bash
 ssh pi@stitchlab.local
-systemctl status nginx moonraker klipper
+systemctl status nginx moonraker klipper live_jogd
 systemctl list-timers | grep AccessPopup
 ```
 
@@ -125,134 +153,44 @@ systemctl list-timers | grep AccessPopup
 | TurtleStitch | http://stitchlab.local:3000 |
 | Moonraker API | http://stitchlab.local:7125 |
 
-## Adding a Module
-
-1. Create directory: `src/modules/mymodule/`
-2. Create `config` with variables
-3. Create `start_chroot_script` with installation logic
-4. Add `filesystem/` for static files
-5. Add to `MODULES` in `src/config`
-
-See [CustomPiOS docs](https://github.com/guysoft/CustomPiOS) for details.
-
 ## Troubleshooting
-
-### Build fails with "loop device" error
-
-```bash
-sudo modprobe loop
-```
-
-### Image too large
-
-- Base image is Raspberry Pi OS Full (~8GB extracted)
-- Use xz compression for distribution
 
 ### Pi Imager doesn't show customization options
 
 - Ensure `KEEP_CLOUDINIT="yes"` in `src/config`
 - `os_list.json` must have `"init_format": "cloudinit-rpi"`
 
-## Building with UTM (macOS)
+### "No space left on device" during build
 
-CustomPiOS requires Linux. On macOS, use a UTM virtual machine.
+- Remove large apt packages from chroot installs (ARM toolchain ~700MB)
+- Use `--depth=1` on all `git clone` calls
+- Remove `docs/` from Klipper and Moonraker after cloning
 
-### Recommended Setup
+### "Error: could not find image"
 
-**Ubuntu Server 24.04 LTS (ARM64)** - native on Apple Silicon, no emulation overhead.
+- Base image must be in `stitchlabos/image/src/image-raspberrypiarm64/*.xz`
+- Do NOT set `CLEAN=true` — it deletes the downloaded image before building
 
-| Setting | Value |
-|---------|-------|
-| Architecture | ARM64 (Virtualize, not Emulate) |
-| RAM | 8 GB |
-| CPU | 4 cores |
-| Disk | 40 GB |
-| Network | Shared Network |
+### `ModuleNotFoundError: No module named 'git'`
 
-### VM Installation
+- Host runner needs `gitpython`: `pip3 install gitpython --break-system-packages`
 
-1. Download: [Ubuntu Server ARM64](https://ubuntu.com/download/server/arm)
-2. Create VM in UTM with above settings
-3. Install Ubuntu Server (minimal, enable SSH)
+### `ensurepip` failure in virtualenv creation
 
-### Post-Install Setup
+- Use `virtualenv -p python3 <path>` instead of `python3 -m venv <path>`
+
+### Build fails with "loop device" error
 
 ```bash
-# Update and install dependencies
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y \
-    git qemu-user-static binfmt-support p7zip-full xz-utils jq \
-    curl wget coreutils util-linux gawk realpath file \
-    kpartx dosfstools e2fsprogs parted zerofree zip bsdtar
-
-# Enable loop device
 sudo modprobe loop
 echo "loop" | sudo tee /etc/modules-load.d/loop.conf
-
-# Install Node.js 20
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
 ```
 
-### SSH Access
+## Adding a Module
 
-```bash
-# Get VM IP
-ip addr show
+1. Create `src/modules/mymodule/config` with exported variables
+2. Create `src/modules/mymodule/start_chroot_script` starting with `#!/usr/bin/env bash\nset -e\nsource /common.sh`
+3. Add `filesystem/` for static files (copied via `unpack`)
+4. Add module name to `MODULES` in `src/config`
 
-# On macOS ~/.ssh/config
-Host stitchlab-builder
-    HostName <VM-IP>
-    User builder
-```
-
-### Build Script
-
-Create `~/build-stitchlabos.sh` on the VM:
-
-```bash
-#!/bin/bash
-set -e
-
-BUILD_DIR="$HOME/build"
-REPO_DIR="$HOME/MainsailDev"
-
-sudo modprobe loop
-mkdir -p "$BUILD_DIR" && cd "$BUILD_DIR"
-
-# Clone CustomPiOS
-[ ! -d "CustomPiOS" ] && git clone https://github.com/guysoft/CustomPiOS.git
-
-# Build Mainsail
-cd "$REPO_DIR/mainsail" && npm ci && npm run build
-mkdir -p "$REPO_DIR/stitchlabos/image/src/modules/mainsail/filesystem/home/pi/mainsail"
-cp -r dist/* "$REPO_DIR/stitchlabos/image/src/modules/mainsail/filesystem/home/pi/mainsail/"
-
-# Prepare TurtleStitch
-mkdir -p "$REPO_DIR/stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch"
-cp -r "$REPO_DIR/turtlestitch/"* "$REPO_DIR/stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/" 2>/dev/null || true
-rm -rf "$REPO_DIR/stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/.git"
-
-# Build image
-cd "$REPO_DIR/stitchlabos/image"
-"$BUILD_DIR/CustomPiOS/src/update-custompios-paths"
-cd src && sudo bash -x ./build_dist
-
-# Compress
-cd workspace
-IMAGE=$(ls *.img 2>/dev/null | head -1)
-[ -n "$IMAGE" ] && xz -9 -T0 -v "$IMAGE" && sha256sum "${IMAGE}.xz" > "${IMAGE}.xz.sha256"
-```
-
-### Usage
-
-```bash
-# Sync code to VM
-rsync -avz --exclude='.git' --exclude='node_modules' \
-    ~/Documents/Projekte/MainsailDev/ builder@stitchlab-builder:~/MainsailDev/
-
-# Build
-ssh stitchlab-builder "~/build-stitchlabos.sh"
-
-# Copy output
-scp builder@stitchlab-builder:~/MainsailDev/stitchlabos/image/src/workspace/*.xz* .
+See [CustomPiOS docs](https://github.com/guysoft/CustomPiOS) for details.
