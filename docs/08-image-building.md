@@ -50,7 +50,7 @@ GitHub Actions builds on tags (`v*`) and manual dispatch. **Never** on every pus
 3. Copy TurtleStitch submodule → `modules/turtlestitch/filesystem/home/pi/turtlestitch/`
 4. Install host dependencies (including `gitpython` for CustomPiOS's `execution_order.py`)
 5. Clone CustomPiOS (`--depth=1`)
-6. Download Raspberry Pi OS Lite arm64 (`.img.xz`) into `stitchlabos/image/src/image-raspberrypiarm64/` — **this exact path is required** by CustomPiOS's `generate_board_config.py` which searches `$DIST_PATH/image-{BOARD}/` for `*.xz` files to set `BASE_ZIP_IMG`
+6. Download Raspberry Pi OS Lite arm64 (`.img.xz`) into `stitchlabos/image/src/image-raspberrypiarm64/` — **this exact path is required** by CustomPiOS's `generate_board_config.py` which searches `$DIST_PATH/image-{BOARD}/` for `*.xz` files to set `BASE_ZIP_IMG`. The image is also **expanded to 6GB** before recompressing: Pi OS Lite only has ~1.5GB free on its rootfs which isn't enough for Klipper/Moonraker deps + pip virtualenvs. Expansion: `truncate -s 6G img` → `parted resizepart 2 100%` → `losetup -P` → `e2fsck -fy` + `resize2fs` → `xz -1 -T0`.
 7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... bash -x .../build`
 8. Compress output with `xz -9`, generate sha256
 9. Upload as artifact (7-day retention)
@@ -162,9 +162,10 @@ systemctl list-timers | grep AccessPopup
 
 ### "No space left on device" during build
 
-- Remove large apt packages from chroot installs (ARM toolchain ~700MB)
-- Use `--depth=1` on all `git clone` calls
-- Remove `docs/` from Klipper and Moonraker after cloning
+- The base image is expanded to 6GB in the CI workflow before building (see step 6 above)
+- ARM toolchain (`gcc-arm-none-eabi` etc.) is NOT installed — ~700MB saving
+- All `git clone` calls use `--depth=1`
+- `docs/` is removed from Klipper and Moonraker after cloning
 
 ### "Error: could not find image"
 
