@@ -50,6 +50,7 @@ jobs:
             kpartx dosfstools e2fsprogs parted zerofree zip libarchive-tools
           sudo modprobe loop
           echo "loop" | sudo tee /etc/modules-load.d/loop.conf
+          sudo pip3 install gitpython --break-system-packages
 
       - name: Clone CustomPiOS
         run: |
