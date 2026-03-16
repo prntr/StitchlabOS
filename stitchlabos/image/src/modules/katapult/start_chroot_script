@@ -9,7 +9,7 @@ echo "=== StitchLabOS: Installing Katapult ==="
 
 # Clone Katapult
 echo "Cloning Katapult..."
-sudo -u pi git clone ${KATAPULT_REPO} ${KATAPULT_DIR}
+sudo -u pi git clone --depth=1 ${KATAPULT_REPO} ${KATAPULT_DIR}
 
 # Note: Katapult requires manual configuration via 'make menuconfig'
 # and building for specific MCU targets. This is left to the user.

@@ -9,7 +9,7 @@ echo "=== StitchLabOS: Installing KIAUH ==="
 
 # Clone KIAUH (for future updates/management by user)
 echo "Cloning KIAUH..."
-sudo -u pi git clone ${KIAUH_REPO} ${KIAUH_DIR}
+sudo -u pi git clone --depth=1 ${KIAUH_REPO} ${KIAUH_DIR}
 
 echo "=== KIAUH module complete ==="
 echo "Run ~/kiauh/kiauh.sh to manage Klipper components"

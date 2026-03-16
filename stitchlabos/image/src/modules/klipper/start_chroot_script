@@ -23,13 +23,15 @@ apt-get install -y \
 id -u pi &>/dev/null || useradd -m -s /bin/bash pi
 usermod -aG dialout,tty,video pi
 
-# Clone Klipper
+# Clone Klipper (shallow, strip docs to save space)
 echo "Cloning Klipper..."
-sudo -u pi git clone ${KLIPPER_REPO} ${KLIPPER_DIR}
+sudo -u pi git clone --depth=1 ${KLIPPER_REPO} ${KLIPPER_DIR}
+rm -rf ${KLIPPER_DIR}/docs
 
-# Clone Moonraker
+# Clone Moonraker (shallow)
 echo "Cloning Moonraker..."
-sudo -u pi git clone ${MOONRAKER_REPO} ${MOONRAKER_DIR}
+sudo -u pi git clone --depth=1 ${MOONRAKER_REPO} ${MOONRAKER_DIR}
+rm -rf ${MOONRAKER_DIR}/docs
 
 # Create Klipper virtual environment
 echo "Setting up Klipper virtualenv..."
