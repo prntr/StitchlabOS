@@ -106,7 +106,7 @@ jobs:
           NEW_NAME="${DIST_NAME}-${{ steps.version.outputs.version }}.img"
           sudo mv "$IMAGE" "$NEW_NAME"
           sudo xz -9 -T0 -v "$NEW_NAME"
-          sudo sha256sum "${NEW_NAME}.xz" > "${NEW_NAME}.xz.sha256"
+          sudo sha256sum "${NEW_NAME}.xz" | sudo tee "${NEW_NAME}.xz.sha256" > /dev/null
           echo "IMAGE_XZ=${NEW_NAME}.xz" >> $GITHUB_ENV
 
       - name: Upload build artifact
