@@ -56,7 +56,7 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/guysoft/CustomPiOS.git
 
-      - name: Download Raspberry Pi OS base image
+      - name: Download and expand Raspberry Pi OS base image
         run: |
           # CustomPiOS looks for base images in $DIST_PATH/image-{BOARD}/ directory
           mkdir -p stitchlabos/image/src/image-raspberrypiarm64
@@ -64,6 +64,18 @@ jobs:
           wget -q --show-progress \
             "https://downloads.raspberrypi.com/raspios_lite_arm64_latest" \
             -O stitchlabos/image/src/image-raspberrypiarm64/raspios_lite_arm64.img.xz
+          echo "Extracting..."
+          xz -d stitchlabos/image/src/image-raspberrypiarm64/raspios_lite_arm64.img.xz
+          IMG="stitchlabos/image/src/image-raspberrypiarm64/raspios_lite_arm64.img"
+          echo "Expanding rootfs to 6GB for package install headroom..."
+          truncate -s 6G "$IMG"
+          sudo parted -s "$IMG" resizepart 2 100%
+          LOOP=$(sudo losetup -f --show -P "$IMG")
+          sudo e2fsck -fy "${LOOP}p2"
+          sudo resize2fs "${LOOP}p2"
+          sudo losetup -d "$LOOP"
+          echo "Recompressing (fast)..."
+          xz -1 -T0 "$IMG"
           ls -lh stitchlabos/image/src/image-raspberrypiarm64/
 
       - name: Build image
