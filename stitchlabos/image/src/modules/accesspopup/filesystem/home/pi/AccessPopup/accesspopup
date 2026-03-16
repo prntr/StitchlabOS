@@ -12,8 +12,8 @@ wdev0=wlan0 #wifi device that AP will work on
 
 #AP setup
 ap_profile_name='AccessPopup'
-ap_ssid='AccessPopup'
-ap_pw='1234567890'
+ap_ssid='Stitchlab'
+ap_pw='praxistest'
 ap_ip='192.168.50.5/24'
 ap_gate='192.168.50.254'
 

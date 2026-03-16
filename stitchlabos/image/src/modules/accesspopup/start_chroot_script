@@ -62,7 +62,7 @@ WantedBy=timers.target
 EOF
 
 # Create the AP profile for NetworkManager
-# This creates a hotspot named "AccessPopup" with IP 192.168.50.5
+# This creates a hotspot named "Stitchlab" with IP 192.168.50.5
 cat > /etc/NetworkManager/system-connections/AccessPopup.nmconnection << 'EOF'
 [connection]
 id=AccessPopup
@@ -75,10 +75,11 @@ interface-name=wlan0
 band=bg
 channel=6
 mode=ap
-ssid=AccessPopup
+ssid=Stitchlab
 
 [wifi-security]
-key-mgmt=none
+key-mgmt=wpa-psk
+psk=praxistest
 
 [ipv4]
 address1=192.168.50.5/24

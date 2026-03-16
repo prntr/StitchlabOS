@@ -2,5 +2,5 @@
 # Provides automatic WiFi AP fallback when no network is available
 
 # AccessPopup settings
-export ACCESSPOPUP_SSID="AccessPopup"
+export ACCESSPOPUP_SSID="Stitchlab"
 export ACCESSPOPUP_TIMER_INTERVAL="2min"
