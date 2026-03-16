@@ -99,14 +99,14 @@ jobs:
       - name: Compress and checksum
         run: |
           cd stitchlabos/image/src/workspace
-          IMAGE=$(ls *.img 2>/dev/null | head -1)
+          IMAGE=$(sudo ls *.img 2>/dev/null | head -1)
           if [ -z "$IMAGE" ]; then
             echo "ERROR: No .img file found" && exit 1
           fi
           NEW_NAME="${DIST_NAME}-${{ steps.version.outputs.version }}.img"
-          mv "$IMAGE" "$NEW_NAME"
-          xz -9 -T0 -v "$NEW_NAME"
-          sha256sum "${NEW_NAME}.xz" > "${NEW_NAME}.xz.sha256"
+          sudo mv "$IMAGE" "$NEW_NAME"
+          sudo xz -9 -T0 -v "$NEW_NAME"
+          sudo sha256sum "${NEW_NAME}.xz" > "${NEW_NAME}.xz.sha256"
           echo "IMAGE_XZ=${NEW_NAME}.xz" >> $GITHUB_ENV
 
       - name: Upload build artifact
