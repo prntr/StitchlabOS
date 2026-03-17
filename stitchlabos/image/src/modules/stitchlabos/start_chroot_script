@@ -9,7 +9,9 @@ echo "=== StitchLabOS: Applying final customizations ==="
 
 # Install additional packages for WiFi management
 apt-get update
-apt-get install -y avahi-daemon dnsmasq
+# Note: do NOT install standalone dnsmasq — it conflicts with NetworkManager's
+# internal dnsmasq used for AP shared mode (both bind port 53).
+apt-get install -y avahi-daemon
 
 # Unpack StitchLabOS files
 unpack /filesystem/home/pi /home/pi pi

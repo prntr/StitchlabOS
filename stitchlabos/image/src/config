@@ -25,8 +25,14 @@ export BASE_IMAGE_SECTION="latest"
 # - stitchlabos: Final customizations (wifi_manager, macros, etc.)
 export MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd,stitchlabos)"
 
-# Default hostname (user can override via Pi Imager)
+# Default hostname — also sets BASE_OVERRIDE_HOSTNAME to prevent
+# CustomPiOS from using the lowercased DIST_NAME as hostname
 export DIST_HOSTNAME="stitchlab"
+export BASE_OVERRIDE_HOSTNAME="stitchlab"
+
+# Default user credentials (ssh pi@stitchlab.local / lab)
+export BASE_USER="pi"
+export BASE_USER_PASSWORD="lab"
 
 # Keep cloud-init for Pi Imager customization support
 export KEEP_CLOUDINIT="yes"
