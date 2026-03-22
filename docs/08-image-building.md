@@ -124,18 +124,33 @@ export BASE_BOARD="raspberrypiarm64"
 export BASE_IMAGE_SECTION="latest"
 export MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd,stitchlabos)"
 export DIST_HOSTNAME="stitchlab"
-export KEEP_CLOUDINIT="yes"   # Required for Pi Imager customization
+export BASE_OVERRIDE_HOSTNAME="stitchlab"   # Prevents CustomPiOS from using lowercased DIST_NAME
+export BASE_USER="pi"
+export BASE_USER_PASSWORD="lab"             # Default SSH password
+export KEEP_CLOUDINIT="yes"
 ```
+
+> **Note:** `BASE_OVERRIDE_HOSTNAME` is required because CustomPiOS auto-generates a hostname from `DIST_NAME` (which would produce `stitchlabos`). `BASE_USER_PASSWORD` is used by the `userconf-pi` first-boot service — it overrides any `chpasswd` call made inside a chroot script.
 
 ## First Boot
 
-After flashing:
+After flashing (Pi Imager customization is **not supported** — the "Anpassen" button is grayed out):
 
-1. **Hostname**: As configured in Imager (default: `stitchlab`)
-2. **WiFi**: Connects automatically if configured in Imager
-3. **SSH**: Enabled with configured credentials
-4. **AP Mode**: If WiFi fails, AccessPopup creates hotspot within 2 minutes
-   - SSID: `AccessPopup`, IP: `192.168.50.5`
+1. **SSH**: Enabled by default. Login: `pi` / `lab`
+2. **Hostname**: `stitchlab` (resolves as `stitchlab.local` via avahi)
+3. **AP Mode**: If no WiFi is configured, AccessPopup creates a hotspot within ~30 seconds
+   - SSID: `Stitchlab`, password: `praxistest`, IP: `192.168.50.5`
+4. **Adding WiFi**: Connect to the Stitchlab AP → open `http://stitchlab.local` → use the WiFi Manager in Mainsail
+
+### Access
+
+```bash
+# Over Stitchlab AP or local network
+ssh pi@stitchlab.local   # password: lab
+
+# Or by IP when connected to the Stitchlab AP
+ssh pi@192.168.50.5
+```
 
 ### Verify Services
 
@@ -143,6 +158,8 @@ After flashing:
 ssh pi@stitchlab.local
 systemctl status nginx moonraker klipper live_jogd
 systemctl list-timers | grep AccessPopup
+ls /dev/serial0   # UART for SKR Pico — must exist
+tail -5 /home/pi/printer_data/logs/klippy.log
 ```
 
 ### Access Points
@@ -155,10 +172,41 @@ systemctl list-timers | grep AccessPopup
 
 ## Troubleshooting
 
-### Pi Imager doesn't show customization options
+### Pi Imager "Anpassen" button is grayed out
 
-- Ensure `KEEP_CLOUDINIT="yes"` in `src/config`
-- `os_list.json` must have `"init_format": "cloudinit-rpi"`
+Pi Imager customization (hostname/WiFi/SSH) does not work with this image — the button is grayed out despite `KEEP_CLOUDINIT="yes"`. Use the built-in defaults instead: SSH is enabled, password is `lab`, AP mode activates automatically.
+
+### AccessPopup WiFi not appearing
+
+Most likely cause: standalone `dnsmasq` is installed alongside NetworkManager. When the AP activates, NetworkManager spawns its own internal dnsmasq for `ipv4.method=shared` — but if a system dnsmasq is already running, it has already bound port 53 and NM's instance fails to start, causing the AP activation to silently fail every 2 minutes.
+
+**Fix:**
+```bash
+sudo systemctl stop dnsmasq
+sudo systemctl disable dnsmasq
+sudo /usr/bin/accesspopup
+```
+
+The `stitchlabos` module must NOT install `dnsmasq` as a package. Custom DNS entries (e.g. `stitchlab.local → 192.168.50.5`) go in `/etc/NetworkManager/dnsmasq-shared.d/` which NM's internal dnsmasq picks up automatically.
+
+### SKR Pico not reachable (`/dev/serial0` missing)
+
+UART is disabled by default on Raspberry Pi OS. Required additions to `/boot/firmware/config.txt` under `[all]`:
+```
+enable_uart=1
+dtoverlay=disable-bt
+```
+Also remove `console=serial0,115200` from `/boot/firmware/cmdline.txt` — it claims the UART for the Linux console, blocking Klipper.
+
+The `stitchlabos` module's `start_chroot_script` applies these automatically during the build.
+
+### Hostname is `stitchlabos` instead of `stitchlab`
+
+CustomPiOS auto-generates `BASE_OVERRIDE_HOSTNAME` from `DIST_NAME` (lowercased). Explicitly set `BASE_OVERRIDE_HOSTNAME="stitchlab"` in `src/config` to override it.
+
+### Password doesn't match expected value
+
+`userconf-pi` runs on first boot and sets the password from `BASE_USER_PASSWORD`. Any `chpasswd` call inside a chroot script is overwritten. Always set the password via `BASE_USER_PASSWORD` in `src/config`.
 
 ### "No space left on device" during build
 

@@ -25,6 +25,21 @@
 | Buttons don't work | Check browser console (F12) |
 | Macros fail | `journalctl -u klipper -f` |
 
+## SKR Pico / UART
+
+| Symptom | Check |
+|---------|-------|
+| `/dev/serial0` missing | `enable_uart=1` + `dtoverlay=disable-bt` missing from `config.txt` |
+| Klipper: "Unable to connect" | `console=serial0,115200` in `cmdline.txt` — remove it |
+| Klipper connects but no motion | Firmware not flashed to Pico — compile and flash manually |
+
+```bash
+ls /dev/serial0                            # must exist after boot
+grep 'enable_uart\|disable-bt' /boot/firmware/config.txt
+grep 'serial0' /boot/firmware/cmdline.txt  # should return nothing
+tail -20 /home/pi/printer_data/logs/klippy.log
+```
+
 ## Controller Hardware
 
 ```bash

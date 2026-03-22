@@ -7,8 +7,9 @@
 | Item | Value |
 |------|-------|
 | AP Profile | `AccessPopup` |
-| Default AP IP | `192.168.50.5` |
-| Default AP SSID | `stitchlabdev` (configurable) |
+| AP IP | `192.168.50.5` |
+| AP SSID | `Stitchlab` |
+| AP Password | `praxistest` |
 | Mainsail Port | `80` |
 | Moonraker Port | `7125` |
 
@@ -82,20 +83,20 @@ sudo systemctl restart moonraker
 
 ---
 
-### Issue 2: `stitchlabdev.local` Doesn't Resolve in AP Mode
+### Issue 2: `stitchlab.local` Doesn't Resolve in AP Mode
 
-**Symptom:** `ping stitchlabdev.local` returns old/wrong IP or fails.
+**Symptom:** `ping stitchlab.local` returns old/wrong IP or fails.
 
-**Root Cause:** In AP mode the Pi may end up with multiple network interfaces/addresses over time (WiFi client, AP, ethernet, etc.). mDNS can advertise more than one address for `stitchlabdev.local`, and some clients will cache or pick an address that is **not reachable** from the AP subnet.
+**Root Cause:** In AP mode the Pi may end up with multiple network interfaces/addresses over time (WiFi client, AP, ethernet, etc.). mDNS can advertise more than one address for `stitchlab.local`, and some clients will cache or pick an address that is **not reachable** from the AP subnet.
 
 **Important:** `.local` is handled via mDNS (multicast) on most operating systems. That means a dnsmasq “static DNS” entry generally will **not** override `.local` on many clients.
 
-**Common gotcha:** If the Pi is also connected to a “normal” network (WiFi client / Ethernet, e.g. `192.168.0.x`), many clients will resolve `stitchlabdev.local` to that address. That’s not reachable from the AP subnet (`192.168.50.0/24`) unless the client is also on the `192.168.0.x` network.
+**Common gotcha:** If the Pi is also connected to a “normal” network (WiFi client / Ethernet, e.g. `192.168.0.x`), many clients will resolve `stitchlab.local` to that address. That’s not reachable from the AP subnet (`192.168.50.0/24`) unless the client is also on the `192.168.0.x` network.
 
 #### macOS: Can Join AP, But Cannot Open Mainsail (Safari/Firefox)
 
 This is almost always one of:
-- macOS resolves `stitchlabdev.local` to the *old* (WiFi/Ethernet) IP (mDNS cache / multiple A records)
+- macOS resolves `stitchlab.local` to the *old* (WiFi/Ethernet) IP (mDNS cache / multiple A records)
 - a VPN route hijacks `192.168.50.0/24`
 - a proxy setting forces HTTP traffic through a non-reachable proxy
 
@@ -105,10 +106,10 @@ curl -I http://192.168.50.5/
 ```
 Tip: type the full `http://192.168.50.5/` URL in the browser to avoid “HTTPS-first” auto-upgrades.
 
-If `http://192.168.50.5` works but `http://stitchlabdev.local` doesn’t:
+If `http://192.168.50.5` works but `http://stitchlab.local` doesn’t:
 ```bash
 # Show what macOS currently resolves
-dns-sd -G v4 stitchlabdev.local
+dns-sd -G v4 stitchlab.local
 
 # Flush caches
 sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
@@ -117,7 +118,7 @@ sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
 If you have AP-mode DNS configured, prefer the non-mDNS name:
 ```bash
 # Uses normal DNS (via the AP’s dnsmasq), not mDNS
-dscacheutil -q host -a name stitchlabdev.lan
+dscacheutil -q host -a name stitchlab.lan
 ```
 
 If `dns-sd` shows an `IF` of `-1` and a very low TTL, you are likely seeing a cached entry (not a fresh answer from the AP).
@@ -127,18 +128,18 @@ In that case, verify mDNS is actually working on the AP:
 dns-sd -B _workstation._tcp local.
 
 # Check that you don't have a hard override
-sudo grep -n 'stitchlabdev' /etc/hosts || true
+sudo grep -n 'stitchlab' /etc/hosts || true
 ```
 
-If `/etc/hosts` contains a stale line like `192.168.0.131 stitchlabdev.local`, it will override mDNS and break AP-mode access via `.local`.
+If `/etc/hosts` contains a stale line like `192.168.0.131 stitchlab.local`, it will override mDNS and break AP-mode access via `.local`.
 Fix (macOS):
 ```bash
 sudo cp /etc/hosts /etc/hosts.bak
-sudo sed -i '' '/\\sstitchlabdev\\.local\\b/d' /etc/hosts
+sudo sed -i '' '/\\sstitchlab\\.local\\b/d' /etc/hosts
 sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
 
 # Verify system resolution (this uses the system resolver, unlike dns-sd)
-dscacheutil -q host -a name stitchlabdev.local
+dscacheutil -q host -a name stitchlab.local
 ```
 
 If mDNS browsing shows nothing on the AP, look for macOS firewall / VPN & Filters / network security tools blocking UDP 5353 multicast.
@@ -165,7 +166,7 @@ If there’s a VPN route conflict (route shows `utun*`), disconnect VPN (or chan
 sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
 
 # Check what IP is resolving
-dns-sd -G v4 stitchlabdev.local
+dns-sd -G v4 stitchlab.local
 ```
 
 **Pi-Side Avahi Config:**
@@ -189,22 +190,22 @@ grep "enable-reflector" /etc/avahi/avahi-daemon.conf
 sudo systemctl restart avahi-daemon
 ```
 
-**Alternative - Static DNS via dnsmasq (use a non-`.local` name like `stitchlabdev.lan`):**
+**Alternative - Static DNS via dnsmasq (use a non-`.local` name like `stitchlab.lan`):**
 ```bash
 # Create dnsmasq override for AP
 sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d
 cat | sudo tee /etc/NetworkManager/dnsmasq-shared.d/local-dns.conf << 'EOF'
-address=/stitchlabdev.lan/192.168.50.5
-address=/stitchlabdev/192.168.50.5
+address=/stitchlab.lan/192.168.50.5
+address=/stitchlab/192.168.50.5
 # Included for clients that do not treat `.local` as mDNS.
-address=/stitchlabdev.local/192.168.50.5
+address=/stitchlab.local/192.168.50.5
 EOF
 sudo systemctl restart NetworkManager
 ```
 
 **Then access Mainsail in AP mode via:**
 - `http://192.168.50.5/` (always works)
-- `http://stitchlabdev.lan/` (stable DNS in AP mode)
+- `http://stitchlab.lan/` (stable DNS in AP mode)
 
 ---
 
@@ -342,7 +343,7 @@ curl -I http://192.168.50.5
 curl http://192.168.50.5:7125/server/info
 
 # 5. DNS resolution?
-dns-sd -G v4 stitchlabdev.local  # macOS
+dns-sd -G v4 stitchlab.local  # macOS
 ```
 
 ---
