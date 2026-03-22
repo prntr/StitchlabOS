@@ -48,6 +48,23 @@ echo "pi:lab" | chpasswd
 # Enable SSH for headless access
 systemctl enable ssh
 
+# Enable UART for SKR Pico connection (GPIO14/15 ↔ Pico UART)
+# - enable_uart=1: activates the hardware UART on GPIO14/15
+# - disable-bt overlay: frees the PL011 UART from Bluetooth (gives it to GPIO pins)
+# - Remove console=serial0 from cmdline.txt so UART is free for Klipper
+if [ -f /boot/firmware/config.txt ]; then
+    if ! grep -q 'enable_uart=1' /boot/firmware/config.txt; then
+        sed -i '/^\[all\]/a enable_uart=1\ndtoverlay=disable-bt' /boot/firmware/config.txt
+    fi
+fi
+if [ -f /boot/firmware/cmdline.txt ]; then
+    sed -i 's/console=serial0,[0-9]* //' /boot/firmware/cmdline.txt
+fi
+
+# Suppress Moonraker "untracked source files" warning for wifi_manager.py.
+# .git/info/exclude provides local-only git ignore rules — never overwritten by git pull.
+echo "moonraker/components/wifi_manager.py" >> /home/pi/moonraker/.git/info/exclude
+
 # Ensure correct ownership
 chown -R pi:pi /home/pi/printer_data
 chown -R pi:pi /home/pi/moonraker

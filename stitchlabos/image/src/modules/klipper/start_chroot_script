@@ -23,10 +23,11 @@ apt-get install -y \
 id -u pi &>/dev/null || useradd -m -s /bin/bash pi
 usermod -aG dialout,tty,video pi
 
-# Clone Klipper (shallow, strip docs to save space)
+# Clone Klipper (shallow, strip docs content to save space but keep dir)
 echo "Cloning Klipper..."
 sudo -u pi git clone --depth=1 ${KLIPPER_REPO} ${KLIPPER_DIR}
 rm -rf ${KLIPPER_DIR}/docs
+mkdir -p ${KLIPPER_DIR}/docs  # Keep dir: Moonraker update_manager validates its existence
 
 # Clone Moonraker (shallow)
 echo "Cloning Moonraker..."
@@ -52,6 +53,23 @@ sudo -u pi mkdir -p ${PRINTER_DATA}/{config,gcodes,logs,comms,certs,systemd,scri
 # Install systemd service files (from filesystem/)
 unpack /filesystem/etc /etc root
 unpack /filesystem/home/pi /home/pi pi
+
+# Install Moonraker polkit rules (allows service management, reboot, package install)
+mkdir -p /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/moonraker.rules << 'EOF'
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.systemd1.manage-units" ||
+         action.id == "org.freedesktop.login1.power-off" ||
+         action.id == "org.freedesktop.login1.power-off-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.reboot" ||
+         action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
+         action.id == "org.freedesktop.packagekit.package-install" ||
+         action.id == "org.freedesktop.packagekit.system-update") &&
+        subject.user == "pi") {
+        return polkit.Result.YES;
+    }
+});
+EOF
 
 # Enable services
 systemctl daemon-reload
