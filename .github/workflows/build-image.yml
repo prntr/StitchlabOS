@@ -38,8 +38,8 @@ jobs:
       - name: Prepare TurtleStitch
         run: |
           mkdir -p stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch
-          cp -r turtlestitch/* stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/ 2>/dev/null || true
-          rm -rf stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/.git
+          # Use /. (dot) to include hidden files like .git — update_manager needs .git for git pull
+          cp -r turtlestitch/. stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/
 
       - name: Install build dependencies
         run: |

@@ -13,12 +13,26 @@ apt-get update
 # internal dnsmasq used for AP shared mode (both bind port 53).
 apt-get install -y avahi-daemon
 
-# Unpack StitchLabOS files
-unpack /filesystem/home/pi /home/pi pi
+# Unpack system config files (dnsmasq-shared.d, etc.)
 unpack /filesystem/etc /etc root
 
+# Clone stitchlabos-config repo (wifi_manager, scripts, macros)
+# Keep .git intact so Moonraker update_manager can do git pull on deployed machines
+echo "Cloning stitchlabos-config..."
+sudo -u pi git clone --depth=1 https://github.com/prntr/stitchlabos-config.git /home/pi/stitchlabos-config
+
+# Create symlinks from stitchlabos-config to expected locations
+ln -sf /home/pi/stitchlabos-config/moonraker/components/wifi_manager.py \
+    /home/pi/moonraker/moonraker/components/wifi_manager.py
+ln -sf /home/pi/stitchlabos-config/printer_data/config/embroidery_macros.cfg \
+    /home/pi/printer_data/config/embroidery_macros.cfg
+for script in wifi_status.sh wifi_scan.sh wifi_profiles.sh; do
+    ln -sf /home/pi/stitchlabos-config/printer_data/scripts/$script \
+        /home/pi/printer_data/scripts/$script
+done
+
 # Make WiFi scripts executable
-chmod +x /home/pi/printer_data/scripts/wifi_*.sh
+chmod +x /home/pi/stitchlabos-config/printer_data/scripts/wifi_*.sh
 
 # Add [wifi_manager] to moonraker.conf if not present
 if ! grep -q '\[wifi_manager\]' /home/pi/printer_data/config/moonraker.conf 2>/dev/null; then
@@ -59,14 +73,20 @@ if [ -f /boot/firmware/config.txt ]; then
 fi
 if [ -f /boot/firmware/cmdline.txt ]; then
     sed -i 's/console=serial0,[0-9]* //' /boot/firmware/cmdline.txt
+    # Prevent Plymouth from sending boot splash data to the hardware UART,
+    # which corrupts the SKR Pico's serial state and blocks Klipper MCU init.
+    if ! grep -q 'plymouth.ignore-serial-consoles' /boot/firmware/cmdline.txt; then
+        sed -i 's/$/ quiet splash plymouth.ignore-serial-consoles/' /boot/firmware/cmdline.txt
+    fi
 fi
 
-# Suppress Moonraker "untracked source files" warning for wifi_manager.py.
+# Suppress Moonraker "untracked source files" warning for wifi_manager.py symlink.
 # .git/info/exclude provides local-only git ignore rules — never overwritten by git pull.
 echo "moonraker/components/wifi_manager.py" >> /home/pi/moonraker/.git/info/exclude
 
 # Ensure correct ownership
 chown -R pi:pi /home/pi/printer_data
 chown -R pi:pi /home/pi/moonraker
+chown -R pi:pi /home/pi/stitchlabos-config
 
 echo "=== StitchLabOS customizations complete ==="
