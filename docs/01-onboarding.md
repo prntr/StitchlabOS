@@ -17,9 +17,21 @@
 
 | Feature | UI | Backend |
 |---------|-----|---------|
-| `EmbroideryControlPanel.vue` | `embroidery_macros.cfg` |
-| `TheControllerMenu.vue` | `wifi_manager.py` |
+| Embroidery Panel | `EmbroideryControlPanel.vue` | `embroidery_macros.cfg` |
+| Controller Menu | `TheControllerMenu.vue` | `wifi_manager.py` |
 | TurtleStitch offline | Nav link | nginx on Pi `:3000` |
+
+### StitchLAB Hybrid (In Development)
+
+The Hybrid variant adds sewing mode with a detachable XY gantry and foot pedal control.
+
+| Feature | Status | Docs |
+|---------|--------|------|
+| Pogo connector (gantry detection) | Planning | [hybrid/POGO_CONNECTOR.md](hybrid/POGO_CONNECTOR.md) |
+| Mode switching (embroidery/sewing) | Planning | [hybrid/MODE_SWITCHING.md](hybrid/MODE_SWITCHING.md) |
+| Foot pedal via ESP dongle | Planning | [hybrid/FOOT_PEDAL.md](hybrid/FOOT_PEDAL.md) |
+| AS5600 encoder | Prototype | [encoder/README.md](encoder/README.md) |
+| Implementation roadmap | Documented | [hybrid/IMPLEMENTATION_PLAN.md](hybrid/IMPLEMENTATION_PLAN.md) |
 
 See [02-architecture.md](02-architecture.md) for full component locations.
 

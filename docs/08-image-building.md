@@ -30,7 +30,7 @@ StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS) (
 1. Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
 2. Select **Choose OS → Other general-purpose OS → Use custom**
 3. Enter URL: `https://github.com/prntr/StitchlabOS/releases/latest/download/StitchLabOS-latest.img.xz`
-4. Configure hostname, WiFi, SSH via Imager settings (works because `KEEP_CLOUDINIT="yes"` and `"init_format": "cloudinit-rpi"` in `os_list.json`)
+4. **Skip** the Imager customization dialog (hostname/WiFi/SSH) — it is not supported (see [Troubleshooting](#pi-imager-anpassen-button-is-grayed-out)). StitchLabOS ships with SSH enabled, a default password, and automatic AP mode for WiFi setup.
 5. Flash to SD card
 
 ### Direct Download
@@ -134,13 +134,13 @@ export KEEP_CLOUDINIT="yes"
 
 ## First Boot
 
-After flashing (Pi Imager customization is **not supported** — the "Anpassen" button is grayed out):
+No Pi Imager customization needed — StitchLabOS is ready to use out of the box:
 
-1. **SSH**: Enabled by default. Login: `pi` / `lab`
-2. **Hostname**: `stitchlab` (resolves as `stitchlab.local` via avahi)
-3. **AP Mode**: If no WiFi is configured, AccessPopup creates a hotspot within ~30 seconds
+1. **AP Mode**: On first boot (no WiFi configured), AccessPopup creates a hotspot within ~30 seconds
    - SSID: `Stitchlab`, password: `praxistest`, IP: `192.168.50.5`
-4. **Adding WiFi**: Connect to the Stitchlab AP → open `http://stitchlab.local` → use the WiFi Manager in Mainsail
+2. **Adding WiFi**: Connect to the Stitchlab AP → open `http://stitchlab.local` (or `http://192.168.50.5`) → use the WiFi Manager in Mainsail
+3. **SSH**: Enabled by default. Login: `pi` / `lab`
+4. **Hostname**: `stitchlab` (resolves as `stitchlab.local` via avahi)
 
 ### Access
 
@@ -174,7 +174,7 @@ tail -5 /home/pi/printer_data/logs/klippy.log
 
 ### Pi Imager "Anpassen" button is grayed out
 
-Pi Imager customization (hostname/WiFi/SSH) does not work with this image — the button is grayed out despite `KEEP_CLOUDINIT="yes"`. Use the built-in defaults instead: SSH is enabled, password is `lab`, AP mode activates automatically.
+Pi Imager customization (hostname/WiFi/SSH) is not supported — the button is grayed out. This is intentional: StitchLabOS ships with SSH enabled (`pi` / `lab`), a fixed hostname (`stitchlab`), and automatic AP mode (`Stitchlab` / `praxistest`) for WiFi setup on first boot. No manual configuration is needed.
 
 ### AccessPopup WiFi not appearing
 
@@ -198,7 +198,20 @@ dtoverlay=disable-bt
 ```
 Also remove `console=serial0,115200` from `/boot/firmware/cmdline.txt` — it claims the UART for the Linux console, blocking Klipper.
 
-The `stitchlabos` module's `start_chroot_script` applies these automatically during the build.
+### SKR Pico: "Serial connection closed" on every boot
+
+Plymouth (boot splash) sends data to the hardware UART during boot, corrupting the Pico's serial state. Required addition to `/boot/firmware/cmdline.txt`:
+```
+quiet splash plymouth.ignore-serial-consoles
+```
+
+Without this, Klipper fails to connect to the MCU on every cold boot and the Pico must be manually reset.
+
+The `stitchlabos` module's `start_chroot_script` applies all UART fixes (`config.txt`, `cmdline.txt`, Plymouth) automatically during the build.
+
+### Shutdown/Reboot not working from Mainsail
+
+Moonraker needs polkit rules to call `systemctl poweroff/reboot`. The `klipper` module creates `/etc/polkit-1/rules.d/moonraker.rules` during the build. If missing, the Mainsail shutdown/reboot buttons silently fail with `Interactive authentication required` in the Moonraker log. See [06-troubleshooting.md](06-troubleshooting.md#shutdown--reboot-from-mainsail) for the manual fix.
 
 ### Hostname is `stitchlabos` instead of `stitchlab`
 

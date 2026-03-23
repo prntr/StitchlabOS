@@ -14,7 +14,7 @@
 
 ## Klipper Macros
 
-Source: `stitchlabos/config/klipper/embroidery_macros.cfg`
+Source: `stitchlabos-config/printer_data/config/embroidery_macros.cfg`
 
 | Macro | Parameters | Description |
 |-------|------------|-------------|
@@ -26,16 +26,45 @@ Source: `stitchlabos/config/klipper/embroidery_macros.cfg`
 | `NEEDLE_ADJUST` | `AMOUNT=0.1` | Fine-tune needle position |
 | `EMBROIDERY_STATUS` | - | Display position and stitch count |
 
-Install:
+### Hybrid Mode Macros (Planned)
+
+These macros will be added for the StitchLAB Hybrid machine:
+
+| Macro | Parameters | Description |
+|-------|------------|-------------|
+| `_GANTRY_DETACHED` | - | Safety handler: disable XY, switch to sewing mode |
+| `_GANTRY_ATTACHED` | - | Handler: switch to embroidery mode, prompt homing |
+| `QUERY_MODE` | - | Display current mode and gantry state |
+| `_REQUIRE_EMBROIDERY_MODE` | - | Guard: error if not in embroidery mode |
+| `SEWING_STATUS` | - | Display sewing mode status and stitch count |
+| `RESET_STITCH_COUNTER` | - | Reset stitch counter to 0 |
+| `WAIT_NEEDLE_UP` | - | Block until encoder confirms needle UP (requires AS5600) |
+
+See [hybrid/MODE_SWITCHING.md](hybrid/MODE_SWITCHING.md) for full macro definitions.
+
+### Encoder Commands (Requires AS5600 Hardware)
+
+| Command | Parameters | Description |
+|---------|------------|-------------|
+| `QUERY_AS5600` | `SENSOR=<name>` | Read encoder angle and position |
+| `AS5600_STATUS` | `SENSOR=<name>` | Check magnet detection status |
+| `AS5600_START_MONITOR` | `RATE=<hz>` | Start continuous monitoring |
+| `AS5600_STOP_MONITOR` | `SENSOR=<name>` | Stop monitoring |
+| `AS5600_RESET_POSITION` | `SENSOR=<name>` | Reset revolution counter |
+| `AS5600_SET_TARGET` | `SENSOR=<name> POSITION=<deg>` | Set hold target position |
+
+See [encoder/README.md](encoder/README.md) for configuration details.
+
+Install (on a deployed machine, macros are symlinked from `~/stitchlabos-config` automatically):
 ```bash
-cp stitchlabos/config/klipper/embroidery_macros.cfg ~/printer_data/config/
+ln -sf ~/stitchlabos-config/printer_data/config/embroidery_macros.cfg ~/printer_data/config/embroidery_macros.cfg
 echo '[include embroidery_macros.cfg]' >> ~/printer_data/config/printer.cfg
 sudo systemctl restart klipper
 ```
 
 ## Moonraker WiFi API
 
-Endpoints added by `stitchlabos/config/moonraker/wifi_manager.py`:
+Endpoints added by `stitchlabos-config/moonraker/components/wifi_manager.py`:
 
 | Method | Endpoint |
 |--------|----------|
@@ -64,41 +93,9 @@ Upstream docs: `turtlestitch/OFFLINE.md`
 
 ### TurtleStitch Project File Management
 
-TurtleStitch project XML files can be saved to and loaded from the Pi using Moonraker's file API.
+TurtleStitch project XML files can be saved to and loaded from the Pi using Moonraker's file API. Projects are stored in `/home/pi/printer_data/gcodes/turtlestitch_projects/`.
 
-**Save project to Pi:**
-```javascript
-// In TurtleStitch, use Moonraker API to save
-const formData = new FormData();
-formData.append('file', xmlBlob, 'myproject.xml');
-formData.append('root', 'gcodes');
-formData.append('path', 'turtlestitch_projects');
-
-fetch('http://stitchlabdev.local:7125/server/files/upload', {
-  method: 'POST',
-  body: formData
-});
-```
-
-**List projects:**
-```bash
-curl 'http://stitchlabdev.local:7125/server/files/directory?path=gcodes/turtlestitch_projects' | \
-  jq '.result.files'
-```
-
-**Download project:**
-```bash
-curl 'http://stitchlabdev.local:7125/server/files/gcodes/turtlestitch_projects/myproject.xml'
-```
-
-**Delete project:**
-```bash
-curl -X DELETE 'http://stitchlabdev.local:7125/server/files/gcodes/turtlestitch_projects/myproject.xml'
-```
-
-See [components/turtlestitch.md](components/turtlestitch.md) for integration details.
-
-Future (planned): Add nginx reverse proxy to upstream TurtleStitch cloud (e.g. `/turtlestitch-cloud/`) and update `turtlestitch/index.html` `snap-cloud-domain` meta to enable cloud login/save from the Pi UI.
+See [components/turtlestitch.md](components/turtlestitch.md) for API examples, JavaScript integration, and UI details.
 
 ## Mainsail Config
 

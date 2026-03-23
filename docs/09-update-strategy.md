@@ -9,17 +9,15 @@ How StitchLabOS components are developed, released, and updated — both for new
 StitchLabOS is built on top of upstream projects (Klipper, Moonraker, Mainsail, TurtleStitch). Each has a different relationship to our fork and therefore a different update path.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  UPDATE MANAGER (visible in Mainsail UI)                        │
-├──────────────────┬──────────────┬───────────────────────────────┤
-│ Component        │ Source       │ Update mechanism              │
-├──────────────────┼──────────────┼───────────────────────────────┤
-│ Klipper          │ upstream     │ git pull (Klipper3d/klipper)  │
-│ Moonraker        │ upstream     │ git pull (Arksine/moonraker)  │
-│ Mainsail UI      │ prntr fork   │ GitHub Release zip download   │
-│ TurtleStitch     │ prntr fork   │ git pull (prntr/turtlestitch) │
-│ StitchLAB config │ prntr repo   │ git pull (prntr/stitchlabos-config) │
-└──────────────────┴──────────────┴───────────────────────────────┘
+┌──────────────────┬──────────────┬───────────────────────────────────────┐
+│ Component        │ Source       │ Update mechanism                      │
+├──────────────────┼──────────────┼───────────────────────────────────────┤
+│ Klipper          │ upstream     │ git pull (Klipper3d/klipper)          │
+│ Moonraker        │ upstream     │ git pull (Arksine/moonraker)          │
+│ Mainsail UI      │ prntr fork   │ GitHub Release zip download           │
+│ TurtleStitch     │ prntr fork   │ git pull (prntr/turtlestitch)         │
+│ StitchLAB config │ prntr repo   │ git pull (prntr/stitchlabos-config)   │
+└──────────────────┴──────────────┴───────────────────────────────────────┘
 ```
 
 All five rows appear in the Mainsail update panel. The user clicks Update — Moonraker handles the rest.
@@ -85,10 +83,10 @@ persistent_files:
 
 #### CI on prntr/mainsail
 
-A GitHub Actions workflow on `prntr/mainsail` triggers on push to the `stitchlabos/*` branch:
+A GitHub Actions workflow on `prntr/mainsail` triggers on push to any `stitchlabos/*` branch (one branch per upstream version):
 
 1. `npm ci && npm run build` — builds the Vue app
-2. Creates a GitHub Release tagged `v<upstream-version>-stitchlab.<build>` (e.g. `v2.17.0-stitchlab.3`)
+2. Creates a GitHub Release tagged `v<upstream-version>-stitchlab.<build>` (e.g. `v2.17.0-stitchlab.3`) — the build number is auto-incremented by querying existing releases matching the current upstream version
 3. Attaches the dist zip as a release asset
 
 Moonraker fetches the GitHub releases API for `prntr/mainsail`, compares the latest tag to the installed version, and surfaces the update in the Mainsail panel.
@@ -97,7 +95,7 @@ Moonraker fetches the GitHub releases API for `prntr/mainsail`, compares the lat
 
 ### TurtleStitch — prntr fork, no build step needed
 
-Our fork (`prntr/turtlestitch`, branch `fork/master`) has 2 custom commits:
+Our fork (`prntr/turtlestitch`, branch `master`) has 2 custom commits. The local dev setup uses two remotes: `origin` → `backface/turtlestitch` (upstream) and `fork` → `prntr/turtlestitch`.
 
 1. `feat: StitchLAB Moonraker integration and Klipper gcode export` — project save/load via Moonraker file API, G-code export for Klipper
 2. `docs: add fork notice to README`
@@ -112,10 +110,12 @@ type: git_repo
 path: ~/turtlestitch
 origin: https://github.com/prntr/turtlestitch.git
 primary_branch: master
-managed_services:
+managed_services:                   # empty — static JS served by nginx, no service to restart
 ```
 
 Push to `prntr/turtlestitch` → deployed machines can update immediately. No CI required.
+
+> **Image build note:** `.github/workflows/build-image.yml` currently removes `.git` after copying TurtleStitch into the module filesystem (`rm -rf .../.git`). This must be removed — `type: git_repo` requires `.git` to be present on the installed image for `git pull` to work. Use `cp -r turtlestitch/. <dest>/` (dot, not glob) to include hidden files like `.git`.
 
 ---
 
@@ -144,10 +144,34 @@ After update, Moonraker restarts to pick up any changes to `wifi_manager.py`.
 
 #### Setup steps for prntr/stitchlabos-config
 
-1. Create the repo on GitHub as `prntr/stitchlabos-config`
+> **Status:** `prntr/stitchlabos-config` has been created on GitHub (empty). Steps 2–4 are pending.
+
+1. ~~Create the repo on GitHub as `prntr/stitchlabos-config`~~ ✓ done
 2. Move files into it (keeping the same relative paths used on the Pi)
-3. Update the image build to clone this repo during build instead of copying files directly
+3. Update the image build to clone this repo and symlink files to their expected locations (see below)
 4. Add the `[update_manager stitchlabos]` entry to `moonraker.conf`
+
+#### Image build integration detail
+
+The image build (`.github/workflows/build-image.yml`) should clone `prntr/stitchlabos-config` **with `.git` intact** so Moonraker's update_manager can do `git pull` on the installed image. The cloned directory goes to `~/stitchlabos-config`.
+
+Because Moonraker loads components from `~/moonraker/moonraker/components/`, `wifi_manager.py` must be accessible there. Use a symlink — do not copy:
+
+```bash
+# In start_chroot_script (stitchlabos module)
+ln -sf /home/pi/stitchlabos-config/moonraker/components/wifi_manager.py \
+    /home/pi/moonraker/moonraker/components/wifi_manager.py
+ln -sf /home/pi/stitchlabos-config/printer_data/config/embroidery_macros.cfg \
+    /home/pi/printer_data/config/embroidery_macros.cfg
+for script in wifi_status.sh wifi_scan.sh wifi_profiles.sh; do
+    ln -sf /home/pi/stitchlabos-config/printer_data/scripts/$script \
+        /home/pi/printer_data/scripts/$script
+done
+```
+
+The symlink at `~/moonraker/moonraker/components/wifi_manager.py` appears as an untracked file in the moonraker git tree — keep the existing `.git/info/exclude` entry for it. Git pull on moonraker leaves untracked symlinks alone, so the link survives moonraker updates.
+
+`wifi_manager.py` does not use `__file__` or any path relative to its own location, so Python's symlink-following has no functional impact.
 
 ---
 
@@ -188,7 +212,7 @@ mainsail-crew/mainsail
 
 #### Automated detection (GitHub Action — to implement)
 
-A scheduled workflow runs weekly on `prntr/mainsail` (or `StitchlabOS`):
+A scheduled workflow runs weekly on `prntr/mainsail`:
 
 ```
 1. Fetch latest release tags from mainsail-crew/mainsail
@@ -271,7 +295,7 @@ Once pushed, CI builds the dist, creates a GitHub Release, and deployed machines
 1. All component forks are at the desired versions
 2. git tag v1.2.0 on StitchlabOS/main
 3. image build CI triggers:
-   - Builds prntr/mainsail dist
+   - Builds prntr/mainsail from submodule source (`npm ci && npm run build`)
    - Clones prntr/turtlestitch
    - Clones prntr/stitchlabos-config
    - Clones Klipper + Moonraker from upstream
@@ -283,20 +307,28 @@ Once pushed, CI builds the dist, creates a GitHub Release, and deployed machines
 
 ## Implementation checklist
 
-These items are not yet done and need to be implemented to enable the full OTA update path:
+These items enable the full OTA update path:
 
-- [ ] **CI on `prntr/mainsail`** — GitHub Actions workflow that builds the Vue app and publishes a GitHub Release on push to `stitchlabos/*` branch
-- [ ] **Fix `moonraker.conf`** — change `repo: mainsail-crew/mainsail` → `repo: prntr/mainsail` so deployed machines pull from our fork
-- [ ] **Add TurtleStitch update_manager entry** to `moonraker.conf`
-- [ ] **Create `prntr/stitchlabos-config` repo** — move `wifi_manager.py`, wifi scripts, embroidery macros into it; update image build to clone it; add `[update_manager stitchlabos]` to `moonraker.conf`
-- [ ] **Upstream sync GitHub Action** — weekly check on `prntr/mainsail` for new upstream Mainsail releases; auto-opens rebase PR
-- [ ] **Update image build CI** to clone from `prntr/stitchlabos-config` instead of copying files from the `stitchlabos` module
+- [x] **CI on `prntr/mainsail`** — GitHub Actions workflow that builds the Vue app and publishes a GitHub Release on push to `stitchlabos/*` branch (`stitchlab-release.yml`)
+- [x] **Fix `moonraker.conf`** — changed `repo: mainsail-crew/mainsail` → `repo: prntr/mainsail` so deployed machines pull from our fork
+- [x] **Add TurtleStitch update_manager entry** to `moonraker.conf`
+- [x] **Add stitchlabos-config update_manager entry** to `moonraker.conf`; image build clones `prntr/stitchlabos-config` and creates symlinks
+- [x] **Upstream sync GitHub Action** — weekly check on `prntr/mainsail` for new upstream Mainsail releases; auto-opens rebase PR (`upstream-sync.yml`)
+- [x] **Update image build CI** — TurtleStitch `.git` preserved for update_manager; stitchlabos module clones `stitchlabos-config` in chroot
+
+### Optional: upstream sync secret
+
+- [ ] **Add `PAT` secret to `prntr/mainsail`** — the `upstream-sync.yml` workflow needs a Personal Access Token to push new branches (e.g. `stitchlabos/v2.18.0`). Without it, the weekly upstream check runs but fails at the push step. Everything else (release builds, OTA updates) works without it. To set up later: GitHub → Settings → Developer settings → Fine-grained tokens → scope to `prntr/mainsail` with Contents read/write → add as repo secret named `PAT` at `prntr/mainsail/settings/secrets/actions`.
 
 ---
 
 ## What already works today
 
 - Klipper and Moonraker OTA updates via Mainsail panel ✓
+- Mainsail OTA pulls from `prntr/mainsail` fork (first release: `v2.17.0-stitchlab.1`) ✓
+- TurtleStitch OTA updates via Mainsail panel ✓
+- StitchLabOS config OTA updates via `prntr/stitchlabos-config` ✓
+- CI on `prntr/mainsail`: auto-builds and publishes GitHub Release on push to `stitchlabos/*` ✓
 - Image build CI on StitchlabOS main ✓
 - All Moonraker warnings resolved (polkit, dirty repos, untracked files) ✓
 - WiFi AP (Stitchlab / praxistest), SSH (pi/lab), UART for SKR Pico ✓

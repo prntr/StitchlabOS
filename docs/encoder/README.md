@@ -123,32 +123,23 @@ def wait_needle_up():
 
 ## Testing
 
+> **Note:** The examples below use `stitchlab04.local`, the prototype/multi-motor dev Pi where the encoder was first tested. On a production StitchLAB, replace with `stitchlab.local`.
+
 ### Query Current Position
 ```bash
-curl -X POST "http://stitchlab04.local:7125/printer/gcode/script" \
+curl -X POST "http://stitchlab.local:7125/printer/gcode/script" \
   -H "Content-Type: application/json" \
   -d '{"script": "QUERY_AS5600 SENSOR=e0_encoder"}'
 ```
 
 ### Monitor Live Data
 ```bash
-curl -s "http://stitchlab04.local:7125/printer/objects/query?as5600%20e0_encoder" | python3 -m json.tool
+curl -s "http://stitchlab.local:7125/printer/objects/query?as5600%20e0_encoder" | python3 -m json.tool
 ```
 
-## Remote Access
+## Prototype Environment (stitchlab04)
 
-```bash
-# SSH
-ssh pi@stitchlab04.local  # password: lab
-
-# Mainsail UI
-http://stitchlab04.local
-
-# Moonraker API
-http://stitchlab04.local:7125
-```
-
-## Source Locations on stitchlab04
+The encoder was prototyped on `stitchlab04.local` (multi-motor simulator). Source locations on that machine:
 
 ```
 /home/pi/klipper/klippy/extras/as5600.py    # Klipper module
@@ -158,5 +149,8 @@ http://stitchlab04.local:7125
 
 ## Related Documentation
 
-- [Embroiderino Comparison](../Reports/Embroiderino-Comparison.md) - Detailed comparison with markol's project
+- [StitchLAB Hybrid Overview](../hybrid/README.md) - Dual-mode machine (embroidery + sewing)
+- [Mode Switching](../hybrid/MODE_SWITCHING.md) - How encoder integrates with mode state machine
+- [Foot Pedal](../hybrid/FOOT_PEDAL.md) - Encoder provides UI feedback in sewing mode
+- [Implementation Plan](../hybrid/IMPLEMENTATION_PLAN.md) - Phased roadmap including encoder integration
 - [StitchLAB Architecture](../02-architecture.md) - Overall system architecture

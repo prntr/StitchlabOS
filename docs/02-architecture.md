@@ -56,8 +56,8 @@ Macros use `G92` to hide physical Z movement from the logical position.
 
 | Block | Location | Purpose |
 |-------|----------|---------|
-| Klipper macros | `stitchlabos/config/klipper/embroidery_macros.cfg` | Needle model, stitch commands |
-| WiFi manager | `stitchlabos/config/moonraker/wifi_manager.py` | Moonraker WiFi API extension |
+| Klipper macros | `stitchlabos-config/printer_data/config/embroidery_macros.cfg` | Needle model, stitch commands |
+| WiFi manager | `stitchlabos-config/moonraker/components/wifi_manager.py` | Moonraker WiFi API extension |
 | Deploy scripts | `stitchlabos/scripts/rpi/` | Reproducible Pi setup |
 | Embroidery UI | `mainsail/src/components/panels/EmbroideryControlPanel.vue` | Web controls |
 | Controller menu | `mainsail/src/components/TheControllerMenu.vue` | Dongle/WiFi UI |
@@ -74,6 +74,45 @@ Macros use `G92` to hide physical Z movement from the logical position.
 | StitchLabController | Done | LVGL UI + joystick |
 | TheControllerMenu UI | Partial | UI done, needs WebSocket backend |
 | Browser ↔ live_jogd | Missing | WebSocket :7150 not implemented |
+| AS5600 Encoder | Prototype | Python module tested on stitchlab04 |
+| Pogo gantry detection | Planning | [docs/hybrid/POGO_CONNECTOR.md](hybrid/POGO_CONNECTOR.md) |
+| Mode switching (embroidery/sewing) | Planning | [docs/hybrid/MODE_SWITCHING.md](hybrid/MODE_SWITCHING.md) |
+| Foot pedal via dongle | Planning | [docs/hybrid/FOOT_PEDAL.md](hybrid/FOOT_PEDAL.md) |
+| SewingControlPanel UI | Planning | Sewing mode frontend panel |
+
+## StitchLAB Hybrid — Dual Mode Architecture
+
+The StitchLAB Hybrid extends the base architecture with a detachable XY gantry and sewing mode:
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│                     MODE STATE MACHINE                             │
+│                                                                   │
+│   EMBROIDERY (gantry attached)    │    SEWING (gantry detached)   │
+│   • XY + Z steppers               │    • Z stepper only           │
+│   • Encoder syncs XY moves        │    • Foot pedal → needle      │
+│   • G-code job execution          │    • Encoder → UI feedback    │
+│   • Mainsail: EmbroideryPanel     │    • Mainsail: SewingPanel    │
+└───────────────────┬───────────────┴─────────────┬─────────────────┘
+                    │                             │
+              ┌─────▼─────┐                 ┌─────▼──────┐
+              │ SKR Pico   │                 │ ESP Dongle │
+              │ X,Y,Z + I2C│                │ Foot pedal │
+              └─────┬──────┘                │ via ESP-NOW│
+                    │                       └────────────┘
+             ┌──────┴──────┐
+             │ 12-pin POGO │ ◄── Sense loop on pins 11+12
+             │ connector   │     detects attach/detach
+             └──────┬──────┘
+                    │
+             ┌──────┴──────┐
+             │  XY Gantry  │  (detachable)
+             │  2 motors   │
+             │  2 endstops │
+             └─────────────┘
+```
+
+See [hybrid/README.md](hybrid/README.md) for full documentation.
 
 ## Klipper Coordinate Systems
 
