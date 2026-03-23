@@ -6,3 +6,6 @@
 	path = turtlestitch
 	url = https://github.com/prntr/turtlestitch.git
 	branch = master
+[submodule "stitchlabos-config"]
+	path = stitchlabos-config
+	url = https://github.com/prntr/stitchlabos-config.git
