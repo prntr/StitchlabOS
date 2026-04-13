@@ -22,6 +22,9 @@
 - [G-Code Studio](components/gcode-studio.md) - 2D viewer status
   - [Agent Notes](components/gcode-studio/agents-notes.md)
   - [Repositioning Plan](components/gcode-studio/repositioning-feature-plan.md)
+- [Mainsail Theme](components/mainsail-theme.md) - StitchLab Catppuccin theme (implemented, ships as default)
+- [Temperature Panel](components/temperature-panel.md) - Embroidery-mode CPU/MCU temperature display
+- [Embroidery Dashboard Preview](components/embroidery-dashboard-preview.md) - Live 2D stitch preview in Status Panel
 - [TurtleStitch](components/turtlestitch.md) - Offline app, hosting, project file management
   - [Agent Notes](components/turtlestitch/agents-notes.md)
 
@@ -45,6 +48,10 @@
 
 - [Runbook: Pi Services](runbooks/pi-services.md) - Service management
 - [Runbook: AP Troubleshooting](runbooks/ap-troubleshooting.md) - Mainsail access in AP mode
+
+## AI Agent Integration
+
+- [WebMCP Setup](../MCP/webmcp/README.md) - Connect AI agents (Claude, Cursor, Codex) to the Mainsail UI via MCP
 
 ## External
 

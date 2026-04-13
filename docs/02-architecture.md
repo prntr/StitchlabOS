@@ -5,9 +5,17 @@
 ## System Diagram
 
 ```
+┌──────────────┐    MCP/stdio     ┌──────────────────┐
+│  AI Agent    │◄────────────────►│  WebMCP Bridge   │
+│  (Claude,    │                  │  (localhost WS)  │
+│   Cursor,    │                  └────────┬─────────┘
+│   Codex)     │                           │ WebSocket
+└──────────────┘                           ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         MAINSAIL FRONTEND                               │
-│                                                                         │
+│                       MAINSAIL FRONTEND                                 │
+│  ┌─────────────────┐                                                    │
+│  │  webmcp.js       │  ← Agent tools (dev mode only)                   │
+│  └─────────────────┘                                                    │
 │  ┌──────────────────────────┐    ┌────────────────────────────────────┐ │
 │  │  EmbroideryControlPanel  │    │  TheControllerMenu                 │ │
 │  │  • Needle Toggle         │    │  • Dongle status                   │ │
@@ -62,6 +70,8 @@ Macros use `G92` to hide physical Z movement from the logical position.
 | Embroidery UI | `mainsail/src/components/panels/EmbroideryControlPanel.vue` | Web controls |
 | Controller menu | `mainsail/src/components/TheControllerMenu.vue` | Dongle/WiFi UI |
 | G-Code Studio | `mainsail/src/components/gcodestudio/` | Embroidery visualization |
+| WebMCP Plugin | `mainsail/src/plugins/webmcpIntegration.ts` | Agent tools (dev mode) |
+| WebMCP Bridge | `MCP/webmcp/` | MCP server for AI agents |
 
 ## Integration Status
 
@@ -74,6 +84,7 @@ Macros use `G92` to hide physical Z movement from the logical position.
 | StitchLabController | Done | LVGL UI + joystick |
 | TheControllerMenu UI | Partial | UI done, needs WebSocket backend |
 | Browser ↔ live_jogd | Missing | WebSocket :7150 not implemented |
+| WebMCP Agent Bridge | Done | Dev-mode AI agent integration via MCP |
 | AS5600 Encoder | Prototype | Python module tested on stitchlab04 |
 | Pogo gantry detection | Planning | [docs/hybrid/POGO_CONNECTOR.md](hybrid/POGO_CONNECTOR.md) |
 | Mode switching (embroidery/sewing) | Planning | [docs/hybrid/MODE_SWITCHING.md](hybrid/MODE_SWITCHING.md) |

@@ -34,40 +34,26 @@ No customizations in either repo. Deployed machines pull directly from upstream.
 - User clicks Update → `git pull` + service restart
 - **Nothing for the StitchLAB developer to do**
 
-`moonraker.conf` entries (already in place):
+Modern Moonraker auto-detects and manages updates for itself and Klipper — no explicit `[update_manager]` entries needed for these two. They appear in the Mainsail update panel automatically.
 
-```ini
-[update_manager klipper]
-type: git_repo
-path: ~/klipper
-origin: https://github.com/Klipper3d/klipper.git
-primary_branch: master
-env: ~/klippy-env/bin/python
-requirements: scripts/klippy-requirements.txt
-install_script: scripts/install-klipper.sh
-managed_services: klipper
-
-[update_manager moonraker]
-type: git_repo
-path: ~/moonraker
-origin: https://github.com/Arksine/moonraker.git
-primary_branch: master
-managed_services: moonraker
-```
+> **Note:** Do not add `type: git_repo` entries for klipper or moonraker. Older Moonraker versions required explicit entries, but current versions auto-detect these components. Adding manual entries causes "Unparsed config option" warnings because the built-in updater ignores `git_repo`-specific options.
 
 ---
 
 ### Mainsail — prntr fork, requires CI to publish releases
 
-Our fork (`prntr/mainsail`, branch `stitchlabos/v2.17.0`) has 5 custom commits on top of the upstream tag:
+Our fork (`prntr/mainsail`, branch `stitchlabos/v2.17.0`) has 6 custom commits on top of the upstream tag:
 
 1. `feat: Add StitchlabOS embroidery customizations` — EmbroideryControlPanel, Dashboard registration
 2. `feat(wifi): Add WiFi Manager UI` — TheControllerMenu WiFi menu, SettingsWifiTab, Vuex store
 3. `feat(gcode-studio): Add GCode Studio 2D embroidery viewer` — /studio route, canvas viewer, WebSocket plugin
 4. `chore: update package-lock.json after v2.17.0 rebase`
 5. `docs: add fork notice to README`
+6. `feat(theme): add StitchLab theme, embroidery preview, temperature panel updates` — Catppuccin CSS, immediate watcher fixes, embroidery preview, temp panel, icons, fonts, sidebar backgrounds
 
 Because Mainsail is a pre-built Vue app (a static dist/ zip), the update_manager uses `type: web` which downloads a GitHub Release. This means **`prntr/mainsail` must publish GitHub Releases** with the built dist zip.
+
+Theme note: the StitchLab theme is **implemented** (Catppuccin Frappé/Latte). See [components/mainsail-theme.md](components/mainsail-theme.md) for details. Theme changes are source-level fork changes like any other.
 
 `moonraker.conf` entry (to replace current `mainsail-crew/mainsail`):
 
@@ -196,28 +182,28 @@ Conflict risk is medium — upstream may touch `src/gui.js` where our Moonraker 
 
 ### Mainsail — the main process
 
-Our 5 custom commits sit on top of an upstream version tag. When upstream releases a new version, they must be rebased onto the new base.
+Our 6 custom commits sit on top of an upstream version tag. When upstream releases a new version, they must be rebased onto the new base.
 
 ```
 mainsail-crew/mainsail
 
   v2.17.0 ──── v2.18.0  (upstream releases new version)
       │              │
-      └──[our 5 commits]    need to move here
+      └──[our 6 commits]    need to move here
                      │
-                     └──[our 5 commits rebased]
+                     └──[our 6 commits rebased]
                             │
                      stitchlabos/v2.18.0  (new branch)
 ```
 
-#### Automated detection (GitHub Action — to implement)
+#### Upstream detection (GitHub Action — to implement)
 
-A scheduled workflow runs weekly on `prntr/mainsail`:
+Detection is **not** scheduled. It runs on demand — triggered when the developer manually dispatches the workflow or when a new image build is started. The workflow on `prntr/mainsail`:
 
 ```
 1. Fetch latest release tags from mainsail-crew/mainsail
 2. Compare against the base version encoded in our current branch name
-3. If no new version → exit silently
+3. If no new version → continue with the current branch as-is
 4. If new version found (e.g. v2.18.0):
    a. Create branch stitchlabos/v2.18.0 from upstream v2.18.0 tag
    b. Attempt: git rebase --onto v2.18.0 v2.17.0 stitchlabos/v2.17.0
@@ -284,7 +270,7 @@ Once pushed, CI builds the dist, creates a GitHub Release, and deployed machines
 
 ```
 1. Upstream releases v2.17.1
-2. GitHub Action detects it (within ~1 week)
+2. Developer triggers the upstream-check workflow (manual dispatch or as part of an image build)
 3a. Clean rebase → CI builds → PR opened → merge → deployed machines updated
 3b. Conflicts → PR opened with details → developer resolves (~15 min) → push → CI builds
 ```
@@ -324,8 +310,8 @@ These items enable the full OTA update path:
 
 ## What already works today
 
-- Klipper and Moonraker OTA updates via Mainsail panel ✓
-- Mainsail OTA pulls from `prntr/mainsail` fork (first release: `v2.17.0-stitchlab.1`) ✓
+- Klipper and Moonraker OTA updates via Mainsail panel (auto-detected, no explicit config needed) ✓
+- Mainsail OTA pulls from `prntr/mainsail` fork (latest release: `v2.17.0-stitchlab.2`) ✓
 - TurtleStitch OTA updates via Mainsail panel ✓
 - StitchLabOS config OTA updates via `prntr/stitchlabos-config` ✓
 - CI on `prntr/mainsail`: auto-builds and publishes GitHub Release on push to `stitchlabos/*` ✓

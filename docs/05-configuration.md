@@ -11,6 +11,7 @@
 | 8110 | Webcam simulator | `virtual-klipper-printer/docker-compose.yml` | Y | - | MJPG stream |
 | 3000 | TurtleStitch offline | `/etc/nginx/sites-available/turtlestitch` | - | Y | Nginx serves static |
 | 7150 | live_jogd WebSocket | UI expects it | - | - | **Not implemented** |
+| — | WebMCP bridge | `MCP/.mcp.json` / `npx @jason.today/webmcp` | Y | - | Dev only, localhost WS for AI agents |
 
 ## Klipper Macros
 
@@ -102,6 +103,17 @@ See [components/turtlestitch.md](components/turtlestitch.md) for API examples, J
 Connection target: `mainsail/public/config.json`
 
 Note: Service worker/PWA caching can make config changes appear to not apply. Hard refresh or clear site data.
+
+Theme: the **StitchLab** Catppuccin theme is implemented and ships as the default. See [components/mainsail-theme.md](components/mainsail-theme.md) for details.
+
+### StitchLab UI theme settings
+
+When **StitchLab** is the active Mainsail theme:
+
+- *Settings → UI → Primary* shows Catppuccin accent swatches instead of the unrestricted colour picker.
+- The selected accent is stored as a StitchLab theme token (for example `stitchlab:blue`) and resolves to different hex values in dark/light mode.
+- Primary UI surfaces such as links, active navigation, tabs, sliders, focused inputs, and primary buttons follow that selected accent.
+- Semantic colours remain fixed: success = Green, warning = Peach, error = Red.
 
 ## CORS (if needed)
 

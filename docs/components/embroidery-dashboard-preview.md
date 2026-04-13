@@ -4,14 +4,15 @@ The Status Panel replaces the standard 3D-printing thumbnail with embroidery-spe
 
 ## Current status
 
-| Item | Status | Notes |
-|------|--------|-------|
-| Static design preview | **Implemented** | Canvas renders frame + stitch paths from parsed G-Code |
-| Live needle position | **Implemented** | Crosshair marker tracks toolhead X/Y during printing |
-| Stitch progress | **Implemented** | Completed stitches solid, remaining faded; counter overlay |
-| Embroidery print stats | **Implemented** | Stitch count, jump count, design dimensions, needle state |
-| Shared parsing utility | **Implemented** | `parseEmbroideryGcode.ts` extracts geometry from G-Code |
-| Settings reuse | **Implemented** | Reads frame size, offsets, and colours from `gui.gcodeStudio` store |
+| Item                          | Status          | Notes                                                                                                  |
+| ----------------------------- | --------------- | ------------------------------------------------------------------------------------------------------ |
+| Static design preview         | **Implemented** | Canvas renders frame + stitch paths from parsed G-Code                                                 |
+| Live needle position          | **Implemented** | Crosshair marker tracks toolhead X/Y during printing                                                   |
+| Stitch progress               | **Implemented** | Completed stitches solid, remaining faded; counter overlay                                             |
+| Embroidery print stats        | **Implemented** | Stitch count, jump count, design dimensions, needle state                                              |
+| Shared parsing utility        | **Implemented** | `parseEmbroideryGcode.ts` extracts geometry from G-Code                                                |
+| Settings reuse                | **Implemented** | Reads frame size/offsets from `gui.gcodeStudio`; colours follow the shared Studio palette in StitchLab |
+| StitchLab palette integration | **Implemented** | Uses the shared Studio palette for frame/stitch colours and darker preview background                  |
 
 ## Components
 
@@ -25,6 +26,7 @@ A canvas-based component that renders the embroidery design inside the Status Pa
 
 - Dashed frame rectangle (size from `gui.gcodeStudio.frameWidth/Height`)
 - Stitch paths parsed from the active G-Code file
+- Jump/travel moves are skipped in the small preview so the design silhouette stays readable
 - During printing: completed stitches in solid colour, remaining in faded colour
 - Needle position as a crosshair dot at current toolhead X/Y
 - Overlay bar with filename, stitch counter, and progress percentage
@@ -55,18 +57,25 @@ printer.toolhead.position (updates ~250ms)
 
 **Naming constraint:** The canvas drawing method is named `drawCanvas()`, not `render()`. In Vue 2 class components, `render` is a reserved method name — Vue's template compiler overwrites it with the component's own render function, so any user-defined `render()` method silently breaks.
 
+**Visual hierarchy:**
+
+- Background uses the StitchLab preview surface (`--stitchlab-preview-bg`) so the preview sits darker than surrounding cards.
+- Frame border is thin and dashed.
+- Stitch thread width is deliberately fine and scales with preview zoom instead of using a chunky fixed line.
+- Needle crosshair is thinner than the frame/stitch path so it does not overpower the design.
+
 ### PrintstatusEmbroidery.vue
 
 **Location:** `src/components/panels/Status/PrintstatusEmbroidery.vue`
 
 A stats bar shown below the preview (routed via `Printstatus.vue` based on `isEmbroideryMode`). Displays four columns:
 
-| Column | Source | Notes |
-|--------|--------|-------|
-| Stitch | `embroidery_stats.stitchPointMoveIndices` | Current / total count with progress tooltip |
-| Jumps | `embroidery_stats.jumpCount` | Total jump stitches |
-| Design | `embroidery_stats.designWidth/Height` | W x H in mm |
-| Needle | `toolhead.position[2]` | Up/Down state from Z position modulo 5mm cycle |
+| Column | Source                                    | Notes                                          |
+| ------ | ----------------------------------------- | ---------------------------------------------- |
+| Stitch | `embroidery_stats.stitchPointMoveIndices` | Current / total count with progress tooltip    |
+| Jumps  | `embroidery_stats.jumpCount`              | Total jump stitches                            |
+| Design | `embroidery_stats.designWidth/Height`     | W x H in mm                                    |
+| Needle | `toolhead.position[2]`                    | Up/Down state from Z position modulo 5mm cycle |
 
 Stats are shared from `EmbroideryPreview` via `printer/setData` → `embroidery_stats`.
 
@@ -84,6 +93,8 @@ Wraps `GCodeToGeometry.parse()` and returns:
 - `treatG0AsStitch` — heuristic flag (from GCode Studio logic)
 - `hasColorChanges` — whether the design uses colour changes
 
+When the StitchLab theme is active, `EmbroideryPreview.vue` pulls frame/stitch colours from the same palette helper as G-Code Studio (`getStitchlabGcodeStudioPalette()`), so the dashboard preview stays visually aligned with the full-page viewer.
+
 ## Integration in StatusPanel.vue
 
 ```vue
@@ -95,13 +106,13 @@ Detection uses the theme check: `(this.$store.state.gui.uiSettings?.theme ?? '')
 
 ## Files
 
-| File | Role |
-|------|------|
-| `src/components/panels/Status/EmbroideryPreview.vue` | Canvas-based live preview |
-| `src/components/panels/Status/PrintstatusEmbroidery.vue` | Stitch/jump/design/needle stats bar |
-| `src/components/panels/Status/Printstatus.vue` | Router: selects embroidery or standard print status |
-| `src/components/panels/StatusPanel.vue` | Parent: conditionally renders preview vs thumbnail |
-| `src/lib/embroideryPreview/parseEmbroideryGcode.ts` | G-Code parsing utility |
+| File                                                     | Role                                                |
+| -------------------------------------------------------- | --------------------------------------------------- |
+| `src/components/panels/Status/EmbroideryPreview.vue`     | Canvas-based live preview                           |
+| `src/components/panels/Status/PrintstatusEmbroidery.vue` | Stitch/jump/design/needle stats bar                 |
+| `src/components/panels/Status/Printstatus.vue`           | Router: selects embroidery or standard print status |
+| `src/components/panels/StatusPanel.vue`                  | Parent: conditionally renders preview vs thumbnail  |
+| `src/lib/embroideryPreview/parseEmbroideryGcode.ts`      | G-Code parsing utility                              |
 
 ## Known pitfalls
 

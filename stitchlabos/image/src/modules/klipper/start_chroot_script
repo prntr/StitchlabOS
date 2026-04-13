@@ -61,7 +61,8 @@ polkit.addRule(function(action, subject) {
          action.id == "org.freedesktop.login1.reboot" ||
          action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
          action.id == "org.freedesktop.packagekit.package-install" ||
-         action.id == "org.freedesktop.packagekit.system-update") &&
+         action.id == "org.freedesktop.packagekit.system-update" ||
+         action.id == "org.freedesktop.packagekit.system-sources-refresh") &&
         subject.user == "pi") {
         return polkit.Result.YES;
     }

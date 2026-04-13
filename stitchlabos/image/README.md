@@ -12,14 +12,40 @@ This directory contains the CustomPiOS configuration for building StitchLabOS, a
 - **Katapult**: MCU bootloader for CAN/USB flashing
 - **live_jogd**: USB serial bridge for StitchLab Dongle
 
-## Raspberry Pi Imager Compatibility
+## Flashing the Image
 
-The image supports Raspberry Pi Imager customization:
-- Hostname configuration
-- WiFi SSID/password
-- SSH enable with password or key
-- User account setup
-- Locale/timezone
+### Raspberry Pi Imager (v2.0+)
+
+> **WARNING:** Do NOT select a Raspberry Pi model in the first step.
+> Pi Imager v2.0+ will silently replace your custom image with the stock
+> Raspberry Pi OS for the selected model. Skip the model selection or choose
+> "No filtering" to flash the actual StitchLabOS image.
+
+1. Open Raspberry Pi Imager
+2. **Modell/Device:** skip or choose "No filtering"
+3. **Betriebssystem/OS:** scroll to bottom → "Use custom" → select the `.img.xz`
+4. **Speicher/Storage:** select your SD card
+5. **Anpassung/Customisation** will be grayed out — that's fine, StitchLabOS has all defaults baked in
+6. Click "Schreiben/Write"
+
+### Alternative: command-line flash (most reliable)
+
+```bash
+diskutil unmountDisk /dev/diskN && \
+xzcat StitchLabOS-*.img.xz | sudo dd of=/dev/rdiskN bs=4m && \
+sync && diskutil eject /dev/diskN
+```
+
+Replace `/dev/diskN` with your SD card (find it with `diskutil list external`).
+Note: `status=progress` does not work in zsh — omit it or use bash.
+
+### Default credentials
+
+| | Value |
+|---|---|
+| **SSH** | `pi@stitchlab.local`, password: `lab` |
+| **WiFi AP** | SSID: `Stitchlab`, password: `praxistest` |
+| **AP IP** | `192.168.50.5` |
 
 ## Building Locally
 
@@ -77,9 +103,10 @@ Or use "Use custom" and provide the direct image URL.
 
 ## Default Configuration
 
-- **Hostname**: `stitchlab` (customizable via Imager)
+- **Hostname**: `stitchlab`
 - **Web UI**: http://stitchlab.local (port 80)
 - **TurtleStitch**: http://stitchlab.local:3000
 - **Moonraker API**: http://stitchlab.local:7125
-- **AP Mode SSID**: `AccessPopup` (when WiFi disconnected)
+- **AP Mode SSID**: `Stitchlab` (auto-activates when no WiFi available)
+- **AP Mode Password**: `praxistest`
 - **AP Mode IP**: 192.168.50.5
