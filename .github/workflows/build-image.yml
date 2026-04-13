@@ -126,7 +126,11 @@ jobs:
           body: |
             ## StitchLabOS ${{ steps.version.outputs.version }}
 
-            Flash with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) — hostname, WiFi, and SSH can be configured directly in the imager.
+            Flash with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) using **Use custom** image. No Pi Imager customization needed — SSH, WiFi AP, and hostname are pre-configured.
+
+            ### First Boot
+            - **WiFi AP**: Connect to `Stitchlab` (password: `praxistest`), then open http://stitchlab.local
+            - **SSH**: `ssh pi@stitchlab.local` (password: `lab`)
 
             ### Included
             - Klipper + Moonraker (latest master at build time)
@@ -134,6 +138,7 @@ jobs:
             - TurtleStitch offline editor with Moonraker integration
             - WiFi Manager with AP fallback (AccessPopup)
             - Live Jog controller daemon
+            - KIAUH, Katapult bootloader
           files: |
             stitchlabos/image/src/workspace/*.img.xz
             stitchlabos/image/src/workspace/*.img.xz.sha256
