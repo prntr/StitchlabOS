@@ -288,6 +288,49 @@ nmcli connection show AccessPopup | grep -E 'ipv4\.(addresses|method)'
 
 ---
 
+### Issue 5: Frontend WebSocket Reconnects in AP Mode
+
+> **Status:** Fixed in Beta2 via a three-layer change (frontend + Moonraker + kernel). Originally observed 2025-12-04 as a ~30 s reconnect loop.
+> **Applies to:** Pi acting as AP (AccessPopup active); clients connected directly to `Stitchlab` SSID.
+
+**Symptom (pre-fix):** Mainsail UI drops every 20–90 s. Moonraker log shows a repeating `Websocket Opened` → `Websocket closed while writing` → `Close Reason: "ping timed out", Pong Time Elapsed: 25.00` cycle.
+
+**Root cause — three contributing layers:**
+
+1. **brcmfmac AP-mode power save** parks the Pi's radio for short windows, delaying Moonraker's WebSocket PING frames to associated clients.
+2. **Moonraker ping config was too aggressive** for a lossy Wi-Fi link (10 s ping interval, ~25 s effective timeout — one missed PING closes the socket).
+3. **Frontend had no client-side keepalive** and gave up after 5 reconnect attempts with a fixed 1 s backoff — any burst of Wi-Fi jitter would leave the UI permanently "Connecting…".
+
+Each layer alone wasn't the problem; the combination was. Evidence: same AP config on other systems with standard upstream Mainsail is stable, and disabling power save only eliminated *some* of the reconnects — the residual ones were Moonraker killing otherwise-healthy sockets on a single missed PING.
+
+**Fix (baked into Beta2 image):**
+
+| Layer | Change | Location |
+|-------|--------|----------|
+| Kernel Wi-Fi | `iw dev wlan0 set power_save off` after `klipper.service` is up — keeps radio awake for Moonraker PINGs but preserves the boot-time power protection that stops radio-wake spikes from corrupting SKR Pico UART init | [`wlan0-powersave-off.service`](../../stitchlabos/image/src/modules/stitchlabos/filesystem/etc/systemd/system/wlan0-powersave-off.service) |
+| Moonraker | `websocket_ping_interval=30, websocket_ping_timeout=25` (was 10/~25) — tolerates a full ping cycle of jitter | sed patch in [`start_chroot_script`](../../stitchlabos/image/src/modules/stitchlabos/start_chroot_script) → `/home/pi/moonraker/moonraker/components/application.py` |
+| Frontend | `server.info` keepalive every 10 s, heartbeat armed on `onopen`, exponential backoff reconnect (1 → 30 s, no ceiling), fix latent `removeWaitById` index-0 bug | [`webSocketClient.ts`](../../mainsail/src/plugins/webSocketClient.ts) |
+
+**Residual behavior (accepted):**
+Chromium-based browsers aggressively throttle `setInterval` in *backgrounded* tabs (≥1 min after ~5 min hidden), which pauses the 10 s keepalive. This can cause an occasional clean reconnect when the user refocuses a long-backgrounded Mainsail tab. Safari does not throttle as aggressively. Reconnects are fast (<1 s) and transparent; not considered a bug. Full fix scoped for a future RC in [proposals/websocket-worker-isolation.md](../proposals/websocket-worker-isolation.md) (move WebSocket into a Dedicated Web Worker — unaffected by main-thread throttling, supported by all target browsers).
+
+**Verification:**
+```bash
+# On the Pi:
+sudo iw dev wlan0 get power_save                   # expected: "Power save: off"
+grep websocket_ping /home/pi/moonraker/moonraker/components/application.py  # expected: 30./25.
+systemctl is-enabled wlan0-powersave-off.service   # expected: enabled
+
+# Watch a fresh connection — no "ping timed out" closes while the browser tab is in the foreground:
+tail -f /home/pi/printer_data/logs/moonraker.log | grep -iE 'websocket|ping'
+```
+
+**If the loop comes back:**
+- A Moonraker update via `update_manager` will revert the `application.py` patch. Re-apply with the sed in [`start_chroot_script`](../../stitchlabos/image/src/modules/stitchlabos/start_chroot_script) (guarded by a `grep` so it's idempotent).
+- Verify `wlan0-powersave-off.service` is active with `systemctl status wlan0-powersave-off` — if it failed, check that `klipper.service` is starting (the unit is ordered `After=klipper.service`).
+
+---
+
 ## Configuration Files
 
 | File | Location | Purpose |

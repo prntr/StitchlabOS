@@ -1,0 +1,17 @@
+[Unit]
+# Disables Wi-Fi power save on wlan0 AFTER Klipper has initialized its SKR Pico UART link.
+# Rationale: brcmfmac power save stays ON during boot to avoid radio-wake current spikes
+# on the shared 5 V rail while the SKR Pico brings up over UART (see plymouth/UART notes).
+# Once Klipper is active, we disable power save so Moonraker's WebSocket pings are not
+# delayed by the AP radio parking — this is the residual cause of frontend reconnect
+# loops in AP mode on brcmfmac. See docs/runbooks/ap-troubleshooting.md Issue 5.
+After=klipper.service
+Requires=klipper.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iw dev wlan0 set power_save off
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

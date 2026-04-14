@@ -84,6 +84,18 @@ fi
 # .git/info/exclude provides local-only git ignore rules — never overwritten by git pull.
 echo "moonraker/components/wifi_manager.py" >> /home/pi/moonraker/.git/info/exclude
 
+# Patch Moonraker's Tornado WebSocket ping settings to tolerate Wi-Fi jitter in AP mode.
+# Default (interval=10, timeout=25-ish) disconnects browsers when the client radio briefly
+# parks and misses a PING. 30/25 gives the client a full ping cycle to reply.
+# See docs/runbooks/ap-troubleshooting.md Issue 5 for the diagnostic trail.
+if ! grep -q 'websocket_ping_timeout' /home/pi/moonraker/moonraker/components/application.py; then
+    sed -i "s|'websocket_ping_interval': None if tornado_ver < (6, 5) else 10\\.|'websocket_ping_interval': None if tornado_ver < (6, 5) else 30., 'websocket_ping_timeout': None if tornado_ver < (6, 5) else 25.|" \
+        /home/pi/moonraker/moonraker/components/application.py
+fi
+
+# Install post-Klipper Wi-Fi powersave-off unit (baked by filesystem/, just enable it)
+systemctl enable wlan0-powersave-off.service
+
 # Ensure correct ownership
 chown -R pi:pi /home/pi/printer_data
 chown -R pi:pi /home/pi/moonraker
