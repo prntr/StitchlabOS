@@ -64,7 +64,19 @@ server {
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # P0-10 — keep idle WebSockets alive for 24 h on both legs and
+        # disable Nagle / proxy buffering so ping/pong frames are not
+        # delayed by upstream batching. proxy_socket_keepalive turns on
+        # SO_KEEPALIVE on the upstream TCP socket so half-open
+        # connections (e.g. Windows clients with the default 2 h TCP
+        # keepalive) are detected by the kernel rather than waiting
+        # hours; the actual interval is governed by the system
+        # net.ipv4.tcp_keepalive_* sysctls shipped alongside.
         proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+        proxy_buffering off;
+        tcp_nodelay on;
+        proxy_socket_keepalive on;
     }
 
     location ~ ^/(printer|api|access|machine|server)/ {
