@@ -670,21 +670,39 @@ class LiveJogDaemon:
         await self.moonraker.jog_relative(x=dx, y=dy, feedrate=feedrate)
 
     async def _status_loop(self):
-        """Send status updates to dongle and update cached state."""
+        """
+        Send status updates to dongle and update cached state.
+
+        Cadence is adaptive (P0-3): 10 Hz while a controller is active
+        (recent joystick frame or deadman pressed), 1 Hz otherwise. The
+        per-tick fan-out of three Moonraker requests is collapsed into a
+        single combined ``/printer/objects/query`` so even the active
+        cadence stays at ~10 req/s instead of ~30.
+        """
         logger.info("Status loop started")
 
         while self.running:
             now = time.monotonic()
 
-            if now - self.last_status_time >= config.STATUS_INTERVAL_S:
+            controller_active = (
+                self.current_deadman
+                or (self.last_frame_time > 0
+                    and now - self.last_frame_time < config.CONTROLLER_ACTIVE_TIMEOUT_S)
+            )
+            interval = (
+                config.STATUS_INTERVAL_S
+                if controller_active
+                else config.STATUS_INTERVAL_IDLE_S
+            )
+
+            if now - self.last_status_time >= interval:
                 self.last_status_time = now
 
-                # Update cached state from Moonraker
-                self.homed_axes = await self.moonraker.get_homed_axes()
-                self.printer_idle = await self.moonraker.is_idle()
-                self.current_pos = await self.moonraker.get_position()
+                pos, homed, idle = await self.moonraker.get_status_snapshot()
+                self.current_pos = pos
+                self.homed_axes = homed
+                self.printer_idle = idle
 
-                # Build and send status frame
                 await self._send_status()
 
             await asyncio.sleep(0.01)

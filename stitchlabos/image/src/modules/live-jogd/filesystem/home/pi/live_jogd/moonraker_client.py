@@ -76,6 +76,25 @@ class MoonrakerClient:
         """Get printer info."""
         return await self._get("/printer/info")
 
+    async def get_status_snapshot(self) -> Tuple[Tuple[float, float, float], str, bool]:
+        """
+        One combined query that returns (position, homed_axes, idle).
+        Replaces three separate /printer/objects/query calls per status
+        tick — see P0-3 of the Cross-Platform Mainsail Stability plan.
+        Falls back to safe defaults on error so the status loop never
+        spams Moonraker harder when something goes wrong.
+        """
+        result = await self._get("/printer/objects/query?toolhead&print_stats")
+        if not result or "result" not in result:
+            return ((0.0, 0.0, 0.0), "", False)
+        status = result["result"].get("status", {})
+        toolhead = status.get("toolhead", {})
+        pos = toolhead.get("position", [0, 0, 0, 0])
+        homed = toolhead.get("homed_axes", "")
+        state = status.get("print_stats", {}).get("state", "unknown")
+        idle = state in ("ready", "standby", "complete")
+        return ((pos[0], pos[1], pos[2]), homed, idle)
+
     async def get_position(self) -> Tuple[float, float, float]:
         """
         Get current toolhead position.

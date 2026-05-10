@@ -14,7 +14,15 @@ MOONRAKER_PORT = 7125
 # Jogging parameters
 MAX_VELOCITY_MM_S = 200.0     # Maximum allowed velocity
 JOG_INTERVAL_S = 0.020        # 20ms between G-code commands (50 Hz)
-STATUS_INTERVAL_S = 0.100     # 100ms between status updates (10 Hz)
+STATUS_INTERVAL_S = 0.100     # 100ms between status updates while a
+                              # controller is active (10 Hz). When no
+                              # controller is sending frames and deadman
+                              # is not pressed, the status loop falls
+                              # back to STATUS_INTERVAL_IDLE_S to keep
+                              # baseline Moonraker load close to zero.
+STATUS_INTERVAL_IDLE_S = 1.0  # 1 Hz when no controller is active.
+CONTROLLER_ACTIVE_TIMEOUT_S = 1.0  # No controller frame in this window
+                                   # -> drop to idle cadence.
 
 # Z-axis step size (for button-based Z movement)
 Z_STEP_MM = 0.1
