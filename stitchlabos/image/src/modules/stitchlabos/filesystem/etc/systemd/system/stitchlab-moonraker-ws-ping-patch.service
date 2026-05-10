@@ -1,0 +1,14 @@
+[Unit]
+Description=StitchLabOS — re-apply Moonraker WebSocket ping override
+Documentation=Reports&Plans/Cross-Platform Mainsail Stabilitiy.md
+ConditionPathExists=/home/pi/moonraker/moonraker/components/application.py
+Before=moonraker.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/stitchlab-moonraker-ws-ping-patch
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

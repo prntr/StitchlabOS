@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# StitchLabOS — re-apply Moonraker WebSocket ping override.
+#
+# Moonraker upstream does not (yet) expose websocket_ping_interval or
+# websocket_ping_timeout as a config key in [server]; they are wired into
+# the Tornado handler defaults directly in
+# moonraker/components/application.py. The default ping_interval (10 s)
+# disconnects browsers when the client radio briefly parks and misses a
+# PING. We bump the interval to 30 s and the timeout to 25 s so a client
+# has a full ping cycle to reply.
+#
+# Because update_manager periodically pulls fresh Moonraker code, this
+# patch must be re-applied idempotently on every boot — otherwise a
+# silent regression returns after the next update. P0-11 of the
+# Cross-Platform Mainsail Stability plan.
+#
+# When upstream Moonraker exposes these as native config keys, this
+# script becomes a no-op (the regex below stops matching) and can be
+# replaced by setting the values in moonraker.conf instead.
+
+set -eu
+
+APP_PY="/home/pi/moonraker/moonraker/components/application.py"
+
+if [ ! -f "${APP_PY}" ]; then
+    exit 0
+fi
+
+if grep -q 'websocket_ping_timeout' "${APP_PY}"; then
+    # Already patched on this Moonraker version. Done.
+    exit 0
+fi
+
+if ! grep -q "'websocket_ping_interval': None if tornado_ver < (6, 5) else 10\\." "${APP_PY}"; then
+    # Upstream code shape changed — refuse to guess. Operator must
+    # update this script (or remove it if Moonraker now exposes the
+    # values as native config keys).
+    echo "[ws-ping-patch] application.py shape changed — skipping." >&2
+    exit 0
+fi
+
+sed -i "s|'websocket_ping_interval': None if tornado_ver < (6, 5) else 10\\.|'websocket_ping_interval': None if tornado_ver < (6, 5) else 30., 'websocket_ping_timeout': None if tornado_ver < (6, 5) else 25.|" "${APP_PY}"
+
+echo "[ws-ping-patch] applied: interval=30s timeout=25s"

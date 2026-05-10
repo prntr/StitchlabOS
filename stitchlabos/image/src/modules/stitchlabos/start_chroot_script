@@ -85,13 +85,16 @@ fi
 echo "moonraker/components/wifi_manager.py" >> /home/pi/moonraker/.git/info/exclude
 
 # Patch Moonraker's Tornado WebSocket ping settings to tolerate Wi-Fi jitter in AP mode.
-# Default (interval=10, timeout=25-ish) disconnects browsers when the client radio briefly
+# Default (interval=10s, timeout=25s) disconnects browsers when the client radio briefly
 # parks and misses a PING. 30/25 gives the client a full ping cycle to reply.
-# See docs/runbooks/ap-troubleshooting.md Issue 5 for the diagnostic trail.
-if ! grep -q 'websocket_ping_timeout' /home/pi/moonraker/moonraker/components/application.py; then
-    sed -i "s|'websocket_ping_interval': None if tornado_ver < (6, 5) else 10\\.|'websocket_ping_interval': None if tornado_ver < (6, 5) else 30., 'websocket_ping_timeout': None if tornado_ver < (6, 5) else 25.|" \
-        /home/pi/moonraker/moonraker/components/application.py
-fi
+# See docs/runbooks/ap-troubleshooting.md Issue 5 and P0-11 of the Cross-Platform
+# Mainsail Stability plan.
+#
+# Apply once at image build time and re-apply on every boot via the systemd unit
+# below — otherwise update_manager would silently revert the patch on the next pull.
+chmod +x /usr/local/bin/stitchlab-moonraker-ws-ping-patch
+/usr/local/bin/stitchlab-moonraker-ws-ping-patch || true
+systemctl enable stitchlab-moonraker-ws-ping-patch.service
 
 # Install post-Klipper Wi-Fi powersave-off unit (baked by filesystem/, just enable it)
 systemctl enable wlan0-powersave-off.service
