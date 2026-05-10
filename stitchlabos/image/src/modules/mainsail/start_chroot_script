@@ -26,6 +26,14 @@ ln -sf ${MAINSAIL_CONFIG_DIR}/mainsail.cfg /home/pi/printer_data/config/mainsail
 rm -f ${NGINX_SITES_ENABLED}/default
 ln -sf ${NGINX_SITES_AVAILABLE}/mainsail ${NGINX_SITES_ENABLED}/mainsail
 
+# Ensure migration helper is executable
+chmod +x /usr/local/bin/stitchlab-mainsail-config-migrate
+
+# Enable one-shot migration that rewrites legacy config.json (port 7125 -> null)
+# on every boot. Idempotent: no-op once the file already matches the new default
+# or has been customised. Runs Before=nginx.service.
+systemctl enable stitchlab-mainsail-config-migrate.service
+
 # Enable nginx
 systemctl enable nginx
 

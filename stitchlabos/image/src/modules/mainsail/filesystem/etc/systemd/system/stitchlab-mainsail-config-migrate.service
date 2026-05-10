@@ -1,0 +1,14 @@
+[Unit]
+Description=StitchLabOS — migrate Mainsail config.json to same-origin routing
+Documentation=Reports&Plans/Cross-Platform Mainsail Stabilitiy.md
+ConditionPathExists=/home/pi/mainsail/config.json
+Before=nginx.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/stitchlab-mainsail-config-migrate
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
