@@ -27,9 +27,26 @@ chmod +x ${LIVE_JOGD_DIR}/dongle_api.py
 # Reload udev rules
 udevadm control --reload-rules
 
-# Enable the service (won't start until hardware is connected)
+# Reload systemd so the unit is known. Do *not* enable it: live_jogd is
+# user-triggered from the Mainsail Controller menu via Moonraker
+# machine.services.start. See P0-2 of the Cross-Platform Mainsail
+# Stability plan — autostarting on every boot causes a 3-second respawn
+# loop on dongle-less Pis and a continuous ~30 req/s baseline against
+# Moonraker even when nobody is using the controller.
 systemctl daemon-reload
-systemctl enable live_jogd
+
+# Authorise Moonraker to start/stop live_jogd via machine.services RPCs.
+# moonraker.asvc is the modern allow-list location.
+MOONRAKER_ASVC=/home/pi/printer_data/moonraker.asvc
+if [ -f "${MOONRAKER_ASVC}" ]; then
+    if ! grep -qx "live_jogd" "${MOONRAKER_ASVC}"; then
+        echo "live_jogd" >> "${MOONRAKER_ASVC}"
+        chown pi:pi "${MOONRAKER_ASVC}"
+    fi
+else
+    install -o pi -g pi -m 0644 /dev/null "${MOONRAKER_ASVC}"
+    echo "live_jogd" >> "${MOONRAKER_ASVC}"
+fi
 
 echo "=== live_jogd module complete ==="
-echo "NOTE: Service will start automatically when StitchLab Dongle is connected"
+echo "NOTE: Service is installed but not enabled. Start from Mainsail Controller menu."

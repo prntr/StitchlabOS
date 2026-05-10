@@ -10,7 +10,7 @@
 | 8080 | Vite dev server | `mainsail/vite.config.ts` | Y | - | Dev only |
 | 8110 | Webcam simulator | `virtual-klipper-printer/docker-compose.yml` | Y | - | MJPG stream |
 | 3000 | TurtleStitch offline | `/etc/nginx/sites-available/turtlestitch` | - | Y | Nginx serves static |
-| 7150 | live_jogd WebSocket | UI expects it | - | - | **Not implemented** |
+| 7150 | live_jogd WebSocket | `live_jogd.py` | - | Y | Installed but not auto-started — the Mainsail Controller menu starts the service via Moonraker on demand. |
 | — | WebMCP bridge | `MCP/.mcp.json` / `npx @jason.today/webmcp` | Y | - | Dev only, localhost WS for AI agents |
 
 ## Klipper Macros

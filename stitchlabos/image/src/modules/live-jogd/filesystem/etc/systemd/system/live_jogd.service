@@ -3,6 +3,10 @@ Description=Live Jog Daemon for Klipper
 Documentation=https://github.com/yourusername/KlipperLiveControl
 After=klipper.service moonraker.service nginx.service
 Requires=klipper.service moonraker.service
+# on-failure + burst limit prevents the 3-second respawn loop that
+# previously hammered systemd/journal on dongle-less Pis.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -13,7 +17,11 @@ ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -e /dev/stitchlab-dongle ] &
 ExecStartPre=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi on
 ExecStart=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/live_jogd.py
 ExecStopPost=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi off
-Restart=always
+# Service is user-triggered from the Mainsail Controller menu
+# (machine.services.start { service: "live_jogd" }). It is intentionally
+# *not* WantedBy=multi-user.target — see P0-2 of the Cross-Platform
+# Mainsail Stability plan.
+Restart=on-failure
 RestartSec=3
 
 # Give access to serial port
@@ -23,6 +31,3 @@ SupplementaryGroups=dialout
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=live_jogd
-
-[Install]
-WantedBy=multi-user.target
