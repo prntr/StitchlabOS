@@ -56,6 +56,15 @@ fi
 echo "${STITCHLABOS_HOSTNAME}" > /etc/hostname
 sed -i "s/127.0.1.1.*/127.0.1.1\t${STITCHLABOS_HOSTNAME}/" /etc/hosts
 
+# Ensure the baked-in pi account is interactive. Some Raspberry Pi OS images
+# keep the first user on nologin until userconf-pi runs on first boot.
+if ! id -u pi >/dev/null 2>&1; then
+    useradd -m -s /bin/bash pi
+else
+    usermod -s /bin/bash pi
+fi
+usermod -aG sudo,dialout,tty,video pi
+
 # Set default password for pi user ("lab") so SSH works out-of-box
 echo "pi:lab" | chpasswd
 

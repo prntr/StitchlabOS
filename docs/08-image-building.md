@@ -221,6 +221,16 @@ CustomPiOS auto-generates `BASE_OVERRIDE_HOSTNAME` from `DIST_NAME` (lowercased)
 
 `userconf-pi` runs on first boot and sets the password from `BASE_USER_PASSWORD`. Any `chpasswd` call inside a chroot script is overwritten. Always set the password via `BASE_USER_PASSWORD` in `src/config`.
 
+### SSH login closes with "This account is currently not available"
+
+SSH is enabled, and the password was accepted, but the `pi` user's shell is set to `nologin` instead of `/bin/bash`. The StitchLabOS module forces `pi` to `/bin/bash` during the image build before setting the default password, so releases remain SSH-accessible even if the base Raspberry Pi OS image has a first-boot `userconf-pi` regression.
+
+Manual recovery on a mounted/root shell:
+```bash
+sudo usermod -s /bin/bash pi
+sudo passwd pi
+```
+
 ### "No space left on device" during build
 
 - The base image is expanded to 6GB in the CI workflow before building (see step 6 above)
