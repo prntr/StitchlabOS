@@ -9,15 +9,15 @@ Investigate how to add source-agnostic "smart speed" and acceleration control fo
 ### TurtleStitch export
 
 - Current browser-side G-code export uses fixed feeds only:
-  - [`turtlestitch/src/embroider.js`](/Users/boxer/Documents/Projekte/MainsailDev/turtlestitch/src/embroider.js:466)
+  - [`turtlestitch/src/embroider.js`](/Users/boxer/Code/active/MainsailDev/turtlestitch/src/embroider.js:466)
   - Stitch moves are emitted as `G1 X.. Y.. Z.. F<stitchFeed>`
   - Travel moves are emitted as `G0 X.. Y.. F<travelFeed>`
 - Defaults are static:
   - `travelFeed: 6000`
   - `stitchFeed: 1800`
-  - [`turtlestitch/src/embroider.js`](/Users/boxer/Documents/Projekte/MainsailDev/turtlestitch/src/embroider.js:549)
+  - [`turtlestitch/src/embroider.js`](/Users/boxer/Code/active/MainsailDev/turtlestitch/src/embroider.js:549)
 - Legacy `stitchcode` export is even simpler and has no feed handling:
-  - [`turtlestitch/stitchcode/turtleShepherd.js`](/Users/boxer/Documents/Projekte/MainsailDev/turtlestitch/stitchcode/turtleShepherd.js:847)
+  - [`turtlestitch/stitchcode/turtleShepherd.js`](/Users/boxer/Code/active/MainsailDev/turtlestitch/stitchcode/turtleShepherd.js:847)
 
 ### Existing "problem detection" in TurtleStitch
 
@@ -25,7 +25,7 @@ Investigate how to add source-agnostic "smart speed" and acceleration control fo
   - local revisit density
   - overly long stitches
 - This is warning-only today and does not affect export:
-  - [`turtlestitch/stitchcode/turtleShepherd.js`](/Users/boxer/Documents/Projekte/MainsailDev/turtlestitch/stitchcode/turtleShepherd.js:143)
+  - [`turtlestitch/stitchcode/turtleShepherd.js`](/Users/boxer/Code/active/MainsailDev/turtlestitch/stitchcode/turtleShepherd.js:143)
 - Relevant logic:
   - `density[d] += 1`, `densityWarning = true` when count exceeds `densityMax`
   - `tooLongCount += 1` when a stitch exceeds `maxLength`
@@ -33,14 +33,14 @@ Investigate how to add source-agnostic "smart speed" and acceleration control fo
 ### G-Code Studio
 
 - G-Code Studio already performs an export-time text transformation pass:
-  - [`mainsail/src/components/gcodestudio/GCodeStudio2D.vue`](/Users/boxer/Documents/Projekte/MainsailDev/mainsail/src/components/gcodestudio/GCodeStudio2D.vue:1479)
+  - [`mainsail/src/components/gcodestudio/GCodeStudio2D.vue`](/Users/boxer/Code/active/MainsailDev/mainsail/src/components/gcodestudio/GCodeStudio2D.vue:1479)
 - That transform currently rewrites only `X/Y/I/J` coordinates.
 - This is the best existing insertion point for source-agnostic smart-speed post-processing because it already handles imported TurtleStitch and Ink/Stitch G-code.
 
 ### Hybrid roadmap
 
 - The hybrid docs already assume an embroidery G-code post-processor exists or will exist:
-  - [`docs/hybrid/IMPLEMENTATION_PLAN.md`](/Users/boxer/Documents/Projekte/MainsailDev/docs/hybrid/IMPLEMENTATION_PLAN.md:179)
+  - [`docs/hybrid/IMPLEMENTATION_PLAN.md`](/Users/boxer/Code/active/MainsailDev/docs/hybrid/IMPLEMENTATION_PLAN.md:179)
 - Current planned use is `WAIT_NEEDLE_UP` insertion before XY moves.
 - That same post-processing stage is the natural place for smart-speed zoning.
 
@@ -51,9 +51,9 @@ Investigate how to add source-agnostic "smart speed" and acceleration control fo
   - `max_accel: 1500`
   - `max_z_velocity: 60`
   - `max_z_accel: 120`
-  - [`stitchlabos/image/src/modules/klipper/filesystem/home/pi/printer_data/config/printer.cfg`](/Users/boxer/Documents/Projekte/MainsailDev/stitchlabos/image/src/modules/klipper/filesystem/home/pi/printer_data/config/printer.cfg:77)
+  - [`stitchlabos/image/src/modules/klipper/filesystem/home/pi/printer_data/config/printer.cfg`](/Users/boxer/Code/active/MainsailDev/stitchlabos/image/src/modules/klipper/filesystem/home/pi/printer_data/config/printer.cfg:77)
 - Embroidery macros currently use static Z feed derived from `max_z_velocity`:
-  - [`stitchlabos-config/printer_data/config/embroidery_macros.cfg`](/Users/boxer/Documents/Projekte/MainsailDev/stitchlabos-config/printer_data/config/embroidery_macros.cfg:16)
+  - [`stitchlabos-config/printer_data/config/embroidery_macros.cfg`](/Users/boxer/Code/active/MainsailDev/stitchlabos-config/printer_data/config/embroidery_macros.cfg:16)
 
 ## Relevant External Findings
 
