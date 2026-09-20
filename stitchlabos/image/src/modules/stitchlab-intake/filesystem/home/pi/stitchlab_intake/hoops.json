@@ -1,0 +1,15 @@
+{
+  "default": "standard",
+  "hoops": {
+    "standard": {
+      "hoop_id": "standard",
+      "version": "stitchlab-standard-frame-v1",
+      "usable_width_mm": 80.0,
+      "usable_height_mm": 130.0,
+      "physical_width_mm": 110.0,
+      "physical_height_mm": 169.9,
+      "frame_geometry": "stitchlab_standard",
+      "safe_margin_mm": 0.0
+    }
+  }
+}

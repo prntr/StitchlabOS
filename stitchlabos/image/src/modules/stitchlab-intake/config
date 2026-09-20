@@ -1,0 +1,4 @@
+# stitchlab_intake Module Configuration
+# G-Code intake: compatibility check + thumbnail/metadata generator
+
+export STITCHLAB_INTAKE_DIR="/home/pi/stitchlab_intake"
