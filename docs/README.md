@@ -4,7 +4,10 @@
 
 ## Start Here
 
+- [00 Ökosystem](00-oekosystem.md) - Alle StitchLAB-Repos und wer was macht
+- [10 Roadmap](10-roadmap.md) - Classic → Hybrid → OpenRSS, und was als Nächstes ansteht
 - [01 Onboarding](01-onboarding.md) - What's here
+- [11 Inbetriebnahme](11-inbetriebnahme.md) - Neue Maschine: SD flashen, Pico flashen, prüfen
 - [03 Quickstart (Local)](03-quickstart-local.md) - Dev with simulator
 - [04 Quickstart (Dev Pi)](04-quickstart-pi.md) - Deploy to Pi
 
@@ -16,6 +19,7 @@
 - [07 Development Guidelines](07-development-guidelines.md) - Coding standards
 - [08 Image Building](08-image-building.md) - Build distributable images
 - [09 Update Strategy](09-update-strategy.md) - OTA updates, upstream sync, release cycle
+- [SKR Pico Firmware](../firmware/README.md) - Seed configs, the three builds, flashing
 
 ## Components
 

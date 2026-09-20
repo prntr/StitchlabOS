@@ -1,13 +1,14 @@
 # Agent-Kontrakt -- siehe ~/Code/_std/AGENTS.base.md
-.PHONY: setup dev test lint check help
+.PHONY: setup dev sim test lint check status help
 .DEFAULT_GOAL := help
 
 # Meta-Repo fuer StitchLabOS: ein Raspberry-Pi-Image, das Klipper, Moonraker,
 # eine angepasste Mainsail-Oberflaeche und TurtleStitch buendelt.
 #
-# Die Unterordner mainsail/, turtlestitch/, stitchlabos-config/ und
-# virtual-klipper-printer/ sind EIGENE git-Repos. Aenderungen dort werden dort
-# committet -- ein Commit hier erfasst sie nicht.
+# mainsail/, turtlestitch/ und stitchlabos-config/ sind Submodule,
+# virtual-klipper-printer/ ist ein einfacher Klon ausserhalb der Versionierung.
+# In allen vier Faellen gilt: Aenderungen werden DORT committet -- ein Commit
+# hier haelt bei Submodulen nur den Zeiger fest, nie den Inhalt.
 #
 # Das Image selbst wird nicht lokal gebaut, sondern von CustomPiOS auf GitHub
 # Actions: ein Tag-Push (v*) erzeugt das .img.xz als Release-Artefakt.
@@ -28,7 +29,7 @@ lint:    ## Mainsail-Linter + tote Verweise in der Doku
 	cd mainsail && npm run lint
 	@~/Code/_std/bin/check-links docs
 
-check: lint  ## Tor vor jedem Commit
+check: lint test  ## Tor vor jedem Commit (Hausregel: lint + test)
 
 status:  ## Zustand aller Unter-Repos auf einen Blick
 	@for r in . mainsail turtlestitch stitchlabos-config virtual-klipper-printer; do \
