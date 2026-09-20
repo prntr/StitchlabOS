@@ -25,7 +25,7 @@ The folder name is historical. This is not a Mainsail development checkout.
 
 ## Where this sits
 
-StitchLAB is more than this repo. [`docs/00-oekosystem.md`](docs/00-oekosystem.md) maps
+StitchLAB is more than this repo. [`docs/00-ecosystem.md`](docs/00-ecosystem.md) maps
 every related project and says which one a given change belongs in;
 [`docs/10-roadmap.md`](docs/10-roadmap.md) says where the whole thing is going —
 including `OpenRSS`, the planned replacement for this software stack.

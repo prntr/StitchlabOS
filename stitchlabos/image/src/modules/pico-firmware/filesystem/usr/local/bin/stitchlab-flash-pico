@@ -55,10 +55,10 @@ esac
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
-fail() { printf '\n\033[31mFEHLER: %s\033[0m\n' "$*" >&2; exit 1; }
+fail() { printf '\n\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
 require_file() {
-    [ -s "$1" ] || fail "$1 fehlt oder ist leer. Gehört dieses Image zu einem CI-Build mit Firmware-Job?"
+    [ -s "$1" ] || fail "$1 is missing or empty. Was this image built by CI with the firmware job?"
 }
 
 # --- Klipper must let go of the UART before we can use it -------------------
@@ -66,13 +66,13 @@ KLIPPER_WAS_ACTIVE=0
 release_serial() {
     if systemctl is-active --quiet klipper; then
         KLIPPER_WAS_ACTIVE=1
-        info "Stoppe klipper (hält ${SERIAL})"
+        info "Stopping klipper (it holds ${SERIAL})"
         sudo systemctl stop klipper
     fi
 }
 restore_klipper() {
     if [ "$KLIPPER_WAS_ACTIVE" = "1" ]; then
-        info "Starte klipper wieder"
+        info "Starting klipper again"
         sudo systemctl start klipper || true
     fi
 }
@@ -91,13 +91,13 @@ wait_for_bootsel() {
         return 0
     fi
 
-    say "Pico im BOOTSEL-Modus anstecken"
-    info "1. USB-Kabel vom Pico abziehen (falls gesteckt)"
-    info "2. BOOTSEL-Taste am Pico gedrückt halten"
-    info "3. Pico per USB an einen USB-Port des Pi stecken"
-    info "4. BOOTSEL loslassen"
+    say "Plug in the Pico in BOOTSEL mode"
+    info "1. Unplug the USB cable from the Pico, if connected"
+    info "2. Hold down the BOOTSEL button on the Pico"
+    info "3. Plug the Pico into a USB port of the Pi"
+    info "4. Release BOOTSEL"
     info ""
-    info "Warte bis zu ${BOOTSEL_WAIT}s auf ein Laufwerk mit Label ${BOOTSEL_LABEL} ..."
+    info "Waiting up to ${BOOTSEL_WAIT}s for a drive labelled ${BOOTSEL_LABEL} ..."
 
     deadline=$(( $(date +%s) + BOOTSEL_WAIT ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -116,9 +116,9 @@ flash_via_bootsel() {
     require_file "$uf2"
 
     if ! dev="$(wait_for_bootsel)"; then
-        fail "Kein ${BOOTSEL_LABEL}-Laufwerk gefunden. Sitzt das USB-Kabel, wurde BOOTSEL beim Einstecken gehalten?"
+        fail "No ${BOOTSEL_LABEL} drive found. Is the USB cable seated, and was BOOTSEL held while plugging in?"
     fi
-    info "Gefunden: ${dev}"
+    info "Found: ${dev}"
 
     sudo mkdir -p "$MOUNTPOINT"
     sudo mount "$dev" "$MOUNTPOINT"
@@ -129,49 +129,49 @@ flash_via_bootsel() {
     sudo umount "$MOUNTPOINT" 2>/dev/null || true
     sudo rmdir "$MOUNTPOINT" 2>/dev/null || true
 
-    info "${label} geschrieben — der Pico startet jetzt neu."
+    info "${label} written — the Pico is rebooting now."
     sleep 5
 }
 
 # --- UART path --------------------------------------------------------------
 flash_via_uart() {
     require_file "$KLIPPER_BIN"
-    [ -f "$FLASHTOOL" ] || fail "${FLASHTOOL} fehlt (Katapult-Modul nicht installiert?)"
-    [ -x "$PY" ]        || fail "${PY} fehlt (Klipper-venv nicht installiert?)"
-    [ -e "$SERIAL" ]    || fail "${SERIAL} existiert nicht. enable_uart=1 und dtoverlay=disable-bt in /boot/firmware/config.txt prüfen."
+    [ -f "$FLASHTOOL" ] || fail "${FLASHTOOL} is missing (Katapult module not installed?)"
+    [ -x "$PY" ]        || fail "${PY} is missing (Klipper venv not installed?)"
+    [ -e "$SERIAL" ]    || fail "${SERIAL} does not exist. Check enable_uart=1 and dtoverlay=disable-bt in /boot/firmware/config.txt."
 
-    say "Flashe Klipper über ${SERIAL} (${BAUD} Baud)"
+    say "Flashing Klipper over ${SERIAL} (${BAUD} baud)"
 
     # flashtool occasionally misses the first serial resync on the RP2040
     # (known timing quirk, seen on stitchlab07). Retry before giving up.
     local attempt
     for attempt in 1 2 3; do
-        info "Versuch ${attempt}/3 ..."
+        info "Attempt ${attempt}/3 ..."
         if sudo "$PY" "$FLASHTOOL" -d "$SERIAL" -b "$BAUD" -f "$KLIPPER_BIN"; then
-            info "Klipper-Firmware geschrieben."
+            info "Klipper firmware written."
             return 0
         fi
         sleep 3
     done
-    fail "Flashen über UART nach 3 Versuchen fehlgeschlagen. Ist Katapult auf dem Pico? Sonst: stitchlab-flash-pico --bootsel"
+    fail "Flashing over UART failed after 3 attempts. Is Katapult on the Pico? If not: stitchlab-flash-pico --bootsel"
 }
 
 # --- Verification -----------------------------------------------------------
 verify_mcu() {
-    say "Prüfe, ob Klipper den MCU sieht"
+    say "Checking whether Klipper sees the MCU"
     sudo systemctl restart klipper
     KLIPPER_WAS_ACTIVE=0   # we just started it ourselves
     sleep 8
 
     local log="/home/pi/printer_data/logs/klippy.log"
     if [ -f "$log" ] && tail -n 200 "$log" | grep -q "MCU 'mcu' config"; then
-        info "OK — MCU verbunden."
+        info "OK — MCU connected."
         return 0
     fi
 
-    printf '\n\033[33mMCU noch nicht bestätigt.\033[0m Letzte Zeilen aus klippy.log:\n\n'
-    tail -n 15 "$log" 2>/dev/null || echo "  (kein klippy.log)"
-    printf '\nSiehe docs/11-inbetriebnahme.md, Abschnitt "MCU meldet sich nicht".\n'
+    printf '\n\033[33mMCU not confirmed yet.\033[0m Last lines of klippy.log:\n\n'
+    tail -n 15 "$log" 2>/dev/null || echo "  (no klippy.log)"
+    printf '\nSee docs/11-commissioning.md, section "The MCU does not answer".\n'
     return 1
 }
 
@@ -192,18 +192,18 @@ case "$MODE" in
         ;;
     standalone)
         release_serial
-        flash_via_bootsel "$KLIPPER_STANDALONE_UF2" "Klipper (standalone, ohne Katapult)"
+        flash_via_bootsel "$KLIPPER_STANDALONE_UF2" "Klipper (standalone, no Katapult)"
         verify_mcu || true
         ;;
     auto)
         release_serial
         if [ -n "$(find_bootsel_device)" ]; then
-            info "Pico ist bereits im BOOTSEL-Modus — schreibe Katapult."
+            info "Pico is already in BOOTSEL mode — writing Katapult."
             flash_via_bootsel "$KATAPULT_UF2" "Katapult"
         else
-            say "Kein Pico im BOOTSEL-Modus gefunden"
-            info "Wenn auf dem Pico bereits Katapult läuft, geht es direkt über UART weiter."
-            info "Sonst jetzt abbrechen (Ctrl-C) und 'stitchlab-flash-pico --bootsel' ausführen."
+            say "No Pico found in BOOTSEL mode"
+            info "If Katapult is already on the Pico, this continues over the UART."
+            info "Otherwise cancel now (Ctrl-C) and run 'stitchlab-flash-pico --bootsel'."
             sleep 5
         fi
         flash_via_uart
@@ -211,4 +211,4 @@ case "$MODE" in
         ;;
 esac
 
-say "Fertig."
+say "Done."

@@ -212,6 +212,34 @@ jobs:
           IMAGE_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/${{ env.IMAGE_XZ }}
           RELEASE_DATE: ${{ steps.version.outputs.date }}
 
+      - name: Stage the commissioning guide for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          # Docs on main drift away from what a given image contains. Ship the
+          # guide with the image so a user reads instructions that match the
+          # release they downloaded, not a later main.
+          ASSETS="$GITHUB_WORKSPACE/release-assets"
+          mkdir -p "$ASSETS"
+          {
+            echo "# StitchLabOS ${{ steps.version.outputs.version }} — commissioning"
+            echo
+            echo "> This guide belongs to release ${{ steps.version.outputs.version }}"
+            echo "> (built ${{ steps.version.outputs.date }}). Newer releases ship their own."
+            echo
+            # Relative links to sibling docs break once the file stands alone,
+            # so pin them to this tag on GitHub.
+            BASE="https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.version }}/docs"
+            tail -n +2 docs/11-commissioning.md \
+              | sed -E "s#\]\(([0-9]{2}-[a-z-]+\.md)#](${BASE}/\1#g"
+          } > "$ASSETS/COMMISSIONING.md"
+          if grep -qE '\]\([0-9]{2}-' "$ASSETS/COMMISSIONING.md"; then
+            echo "::error::relative doc link survived in COMMISSIONING.md"
+            grep -nE '\]\([0-9]{2}-' "$ASSETS/COMMISSIONING.md"
+            exit 1
+          fi
+          wc -l "$ASSETS/COMMISSIONING.md"
+
       - name: Stage firmware artifacts for release
         run: |
           set -euo pipefail
@@ -279,6 +307,9 @@ jobs:
             that the MCU came up. Every later firmware update runs over the UART alone —
             no cable, no jumper.
 
+            `COMMISSIONING.md` below is the full walkthrough for **this** image, including
+            what to do when something sticks.
+
             ### Included
 
             - Klipper + Moonraker (master at build time, Klipper `${{ env.KLIPPER_FW_SHA }}`)
@@ -294,6 +325,7 @@ jobs:
             stitchlabos/image/src/workspace/*.img.xz
             stitchlabos/image/src/workspace/*.img.xz.sha256
             release-assets/os_list.json
+            release-assets/COMMISSIONING.md
             release-assets/firmware/*
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-rc') || contains(steps.version.outputs.version, '-beta') }}

@@ -67,5 +67,5 @@ ssh pi@stitchlab.local
 stitchlab-flash-pico
 ```
 
-See [docs/11-inbetriebnahme.md](../docs/11-inbetriebnahme.md) for the full
+See [docs/11-commissioning.md](../docs/11-commissioning.md) for the full
 commissioning walkthrough and the recovery paths.

@@ -2,12 +2,17 @@
 
 > Integration docs for the StitchLAB workspace. Upstream project docs live in their repos.
 
+**Building or running a machine?** Start at the [README](../README.md), not here.
+Its getting-started path is the supported route, and the commissioning guide is
+attached to every release so it matches the image you downloaded. What follows
+is for people changing StitchLabOS itself.
+
 ## Start Here
 
-- [00 Ökosystem](00-oekosystem.md) - Alle StitchLAB-Repos und wer was macht
-- [10 Roadmap](10-roadmap.md) - Classic → Hybrid → OpenRSS, und was als Nächstes ansteht
+- [00 Ecosystem](00-ecosystem.md) - Every StitchLAB repo and what it does
+- [10 Roadmap](10-roadmap.md) - Classic → Hybrid → OpenRSS, and what is next
 - [01 Onboarding](01-onboarding.md) - What's here
-- [11 Inbetriebnahme](11-inbetriebnahme.md) - Neue Maschine: SD flashen, Pico flashen, prüfen
+- [11 Commissioning](11-commissioning.md) - New machine: flash the card, bring up the Pico, verify
 - [03 Quickstart (Local)](03-quickstart-local.md) - Dev with simulator
 - [04 Quickstart (Dev Pi)](04-quickstart-pi.md) - Deploy to Pi
 

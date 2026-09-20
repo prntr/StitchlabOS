@@ -46,7 +46,7 @@ It stops Klipper, waits for the Pico to appear in BOOTSEL mode, writes Katapult,
 flashes Klipper over the UART (retrying the known RP2040 serial-resync quirk),
 restarts Klipper and checks `klippy.log` for the MCU. After that, every firmware
 update runs over `/dev/serial0` alone — no jumper, no cable. See
-[11-inbetriebnahme.md](11-inbetriebnahme.md).
+[11-commissioning.md](11-commissioning.md).
 
 **Config contract.** The seed configs pin UART0 on GPIO0/GPIO1 at **115200 baud**,
 which must equal `baud:` in
