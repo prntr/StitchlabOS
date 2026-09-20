@@ -14,6 +14,9 @@ apt-get install -y nginx
 # Unpack nginx config and pre-built Mainsail dist files (copied by CI before chroot)
 unpack /filesystem/etc /etc root
 unpack /filesystem/home/pi /home/pi pi
+# The migration helper lives under usr/local/bin — without this line the
+# chmod below fails and the whole image build aborts.
+unpack /filesystem/usr /usr root
 
 # Clone mainsail-config
 echo "Cloning mainsail-config..."
