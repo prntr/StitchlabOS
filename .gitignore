@@ -44,3 +44,13 @@ Reports&Plans/
 # Standalone nested git repo (not a submodule)
 virtual-klipper-printer/
 
+# SKR Pico firmware built by CI — regenerable binaries, never in git.
+# Seeds live in firmware/skr-pico/*.config; the build writes the artifacts here.
+stitchlabos/image/src/modules/pico-firmware/filesystem/home/pi/firmware/*
+!stitchlabos/image/src/modules/pico-firmware/filesystem/home/pi/firmware/.gitkeep
+
+# os_list.json is generated per release from os_list.template.json
+stitchlabos/image/os_list.json
+
+# CI release staging directory
+release-assets/

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# StitchLabOS - SKR Pico Firmware Module
+# Installs prebuilt RP2040 firmware and the guided flash helper.
+
+set -e
+source /common.sh
+
+echo "=== StitchLabOS: Installing SKR Pico firmware ==="
+
+# Firmware artifacts (built by CI) + flash helper
+unpack /filesystem/home/pi /home/pi pi
+unpack /filesystem/usr /usr root
+
+chmod +x /usr/local/bin/stitchlab-flash-pico
+
+# Fail the build rather than shipping an image that cannot commission a Pico.
+# A silently missing klipper.bin is exactly the Beta1 failure mode we are fixing.
+for f in klipper.bin klipper.uf2 klipper-standalone.uf2 katapult.uf2; do
+    if [ ! -s "${PICO_FIRMWARE_DIR}/${f}" ]; then
+        echo "ERROR: ${PICO_FIRMWARE_DIR}/${f} missing or empty."
+        echo "       CI must build firmware before the image build (see build-image.yml)."
+        exit 1
+    fi
+done
+
+chown -R pi:pi "${PICO_FIRMWARE_DIR}"
+
+echo "=== SKR Pico firmware module complete ==="
+echo "NOTE: run 'stitchlab-flash-pico' on the Pi to commission a blank Pico."

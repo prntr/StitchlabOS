@@ -18,6 +18,48 @@ StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS) (
 | AccessPopup | WiFi AP fallback mode |
 | live_jogd | USB serial bridge |
 
+### SKR Pico firmware is part of the image
+
+A factory-fresh SKR Pico holds no Klipper firmware, so a freshly flashed card
+alone leaves Klipper without an MCU. Beta1 required building firmware on a
+separate dev machine; a Pi in AP mode has no internet, so "build it on the Pi"
+was not an option either.
+
+CI now builds the firmware from `firmware/skr-pico/*.config` and the
+`pico-firmware` module ships it in `/home/pi/firmware/`:
+
+| File | Purpose |
+|---|---|
+| `katapult.uf2` | Bootloader at `0x10000100`, written once over USB BOOTSEL |
+| `klipper.bin` | Application at `0x10004000`, written through Katapult over `/dev/serial0` |
+| `klipper.uf2` | Same application as a UF2 — only boots with Katapult present |
+| `klipper-standalone.uf2` | Bootloader-free build at `0x10000100` for rescuing a board |
+
+Commissioning is one command on the Pi:
+
+```bash
+ssh pi@stitchlab.local
+stitchlab-flash-pico
+```
+
+It stops Klipper, waits for the Pico to appear in BOOTSEL mode, writes Katapult,
+flashes Klipper over the UART (retrying the known RP2040 serial-resync quirk),
+restarts Klipper and checks `klippy.log` for the MCU. After that, every firmware
+update runs over `/dev/serial0` alone — no jumper, no cable. See
+[11-inbetriebnahme.md](11-inbetriebnahme.md).
+
+**Config contract.** The seed configs pin UART0 on GPIO0/GPIO1 at **115200 baud**,
+which must equal `baud:` in
+[`printer.cfg`](../stitchlabos/image/src/modules/klipper/filesystem/home/pi/printer_data/config/printer.cfg).
+Upstream renamed these symbols to the `RPXXXX_*` / `MACH_RPXXXX` family (older
+notes say `CONFIG_RP2040_FLASH_START_4000`); the addresses are unchanged. CI
+asserts that every seeded symbol survives `make olddefconfig`, so a further
+rename fails the build instead of shipping mute firmware.
+
+**Klipper version.** Host and firmware are both built from master within the same
+CI run. After `update_manager` later updates the host Klipper, reflash the Pico
+with `stitchlab-flash-pico --uart` to clear the version-mismatch warning.
+
 ## GitHub Repository
 
 - Repo: `https://github.com/prntr/StitchlabOS`
@@ -27,11 +69,28 @@ StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS) (
 
 ### Raspberry Pi Imager
 
+**Preferred — StitchLabOS as a selectable OS.** CI publishes an `os_list.json`
+with each release, so Imager can offer StitchLabOS like any other image, with its
+customisation dialog available:
+
+```bash
+rpi-imager --repo https://github.com/prntr/StitchlabOS/releases/latest/download/os_list.json
+```
+
 1. Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-2. Select **Choose OS → Other general-purpose OS → Use custom**
-3. Enter URL: `https://github.com/prntr/StitchlabOS/releases/latest/download/StitchLabOS-latest.img.xz`
-4. **Skip** the Imager customization dialog (hostname/WiFi/SSH) — it is not supported (see [Troubleshooting](#pi-imager-anpassen-button-is-grayed-out)). StitchLabOS ships with SSH enabled, a default password, and automatic AP mode for WiFi setup.
+2. Start it with the `--repo` argument above
+3. **Choose OS → StitchLabOS**
+4. Customisation (hostname/WiFi/SSH) is optional — the image already ships SSH, a
+   default password and AP-mode WiFi setup
 5. Flash to SD card
+
+**Fallback — direct image.** **Choose OS → Use custom**, then pick the `.img.xz`
+from the [release page](https://github.com/prntr/StitchlabOS/releases/latest). Do
+not hand-type an asset URL: the filename carries the version
+(`StitchLabOS-v0.1.0-beta.1.img.xz`), and there is deliberately no `-latest`
+alias. On this path Imager cannot read an `init_format`, so its customisation
+dialog stays greyed out — see
+[Troubleshooting](#pi-imager-anpassen-button-is-grayed-out).
 
 ### Direct Download
 
@@ -174,7 +233,19 @@ tail -5 /home/pi/printer_data/logs/klippy.log
 
 ### Pi Imager "Anpassen" button is grayed out
 
-Pi Imager customization (hostname/WiFi/SSH) is not supported — the button is grayed out. This is intentional: StitchLabOS ships with SSH enabled (`pi` / `lab`), a fixed hostname (`stitchlab`), and automatic AP mode (`Stitchlab` / `praxistest`) for WiFi setup on first boot. No manual configuration is needed.
+This is a property of the **Use custom** path, not of the image. Imager greys the
+customisation dialog out whenever it cannot read an `init_format` for the
+selected image — and a hand-picked `.img.xz` carries no metadata.
+
+Start Imager with `--repo .../os_list.json` (see [Using Pre-built
+Images](#using-pre-built-images)) and the dialog is available: the image keeps
+cloud-init (`KEEP_CLOUDINIT="yes"` in `src/config`), which is why the OS list
+declares `init_format: cloudinit-rpi` — the same value current Raspberry Pi OS
+uses. `systemd` is the *Legacy* Raspberry Pi OS value and would be wrong here.
+
+Either way no manual configuration is required: StitchLabOS ships with SSH
+enabled (`pi` / `lab`), the hostname `stitchlab`, and AP mode
+(`Stitchlab` / `praxistest`) for WiFi setup on first boot.
 
 ### AccessPopup WiFi not appearing
 

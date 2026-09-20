@@ -23,6 +23,63 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Build SKR Pico firmware (Katapult + Klipper)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential python3
+
+          FW_OUT="$GITHUB_WORKSPACE/stitchlabos/image/src/modules/pico-firmware/filesystem/home/pi/firmware"
+          mkdir -p "$FW_OUT"
+
+          # A silently-renamed upstream Kconfig symbol would produce firmware that
+          # builds fine and then cannot talk to the Pi. Fail loudly instead:
+          # every non-comment line of the seed must survive olddefconfig.
+          assert_config() {
+            local generated="$1" seed="$2" line
+            while IFS= read -r line; do
+              case "$line" in ''|\#*) continue ;; esac
+              if ! grep -qxF "$line" "$generated"; then
+                echo "::error::'$line' did not survive olddefconfig ($seed)."
+                echo "Upstream Kconfig symbols changed. Resulting config was:"
+                grep -E 'MACH_|FLASH_START|SERIAL|BAUD' "$generated" || true
+                exit 1
+              fi
+            done < "$seed"
+          }
+
+          build_fw() {
+            local repo="$1" dir="$2" seed="$3"
+            git clone --depth=1 "$repo" "$dir"
+            cp "firmware/skr-pico/${seed}" "$dir/.config"
+            make -C "$dir" olddefconfig
+            assert_config "$dir/.config" "firmware/skr-pico/${seed}"
+            make -C "$dir" -j"$(nproc)"
+          }
+
+          # Katapult first: it owns 0x10000100 and hands over at 0x10004000.
+          build_fw https://github.com/Arksine/katapult.git katapult-build katapult.config
+          cp katapult-build/out/katapult.uf2 "$FW_OUT/"
+
+          # Klipper for the Katapult layout — flashed over /dev/serial0.
+          build_fw https://github.com/Klipper3d/klipper.git klipper-build klipper.config
+          cp klipper-build/out/klipper.bin "$FW_OUT/"
+          cp klipper-build/out/klipper.uf2 "$FW_OUT/"
+          echo "KLIPPER_FW_SHA=$(git -C klipper-build rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "KATAPULT_FW_SHA=$(git -C katapult-build rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+          # Recovery build without a bootloader: the only .uf2 that boots on a
+          # board whose Katapult is gone.
+          rm -rf klipper-build/out
+          cp firmware/skr-pico/klipper-standalone.config klipper-build/.config
+          make -C klipper-build olddefconfig
+          assert_config klipper-build/.config firmware/skr-pico/klipper-standalone.config
+          make -C klipper-build -j"$(nproc)"
+          cp klipper-build/out/klipper.uf2 "$FW_OUT/klipper-standalone.uf2"
+
+          ls -lh "$FW_OUT"
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -98,9 +155,11 @@ jobs:
           else
             echo "version=$(date +%Y%m%d)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           fi
+          echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
       - name: Compress and checksum
         run: |
+          set -euo pipefail
           cd stitchlabos/image/src/workspace
           IMAGE=$(sudo ls *.img 2>/dev/null | head -1)
           if [ -z "$IMAGE" ]; then
@@ -108,9 +167,64 @@ jobs:
           fi
           NEW_NAME="${DIST_NAME}-${{ steps.version.outputs.version }}.img"
           sudo mv "$IMAGE" "$NEW_NAME"
+
+          # Pi Imager needs the size and hash of the *uncompressed* image to
+          # verify what it wrote to the card, so capture both before xz runs.
+          echo "EXTRACT_SIZE=$(sudo stat -c%s "$NEW_NAME")" >> "$GITHUB_ENV"
+          echo "EXTRACT_SHA256=$(sudo sha256sum "$NEW_NAME" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
           sudo xz -9 -T0 -v "$NEW_NAME"
           sudo sha256sum "${NEW_NAME}.xz" | sudo tee "${NEW_NAME}.xz.sha256" > /dev/null
-          echo "IMAGE_XZ=${NEW_NAME}.xz" >> $GITHUB_ENV
+
+          echo "IMAGE_XZ=${NEW_NAME}.xz" >> "$GITHUB_ENV"
+          echo "IMAGE_DOWNLOAD_SIZE=$(sudo stat -c%s "${NEW_NAME}.xz")" >> "$GITHUB_ENV"
+          echo "IMAGE_DOWNLOAD_SHA256=$(sudo sha256sum "${NEW_NAME}.xz" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Generate os_list.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/release-assets"
+          python3 - <<'PY'
+          import json, os, pathlib
+
+          tpl = pathlib.Path("stitchlabos/image/os_list.template.json").read_text()
+          subs = {
+              "__IMAGE_URL__":            os.environ["IMAGE_URL"],
+              "__EXTRACT_SIZE__":         os.environ["EXTRACT_SIZE"],
+              "__EXTRACT_SHA256__":       os.environ["EXTRACT_SHA256"],
+              "__IMAGE_DOWNLOAD_SIZE__":  os.environ["IMAGE_DOWNLOAD_SIZE"],
+              "__IMAGE_DOWNLOAD_SHA256__": os.environ["IMAGE_DOWNLOAD_SHA256"],
+              "__RELEASE_DATE__":         os.environ["RELEASE_DATE"],
+          }
+          for k, v in subs.items():
+              assert k in tpl, f"placeholder {k} not in template"
+              tpl = tpl.replace(k, v)
+          assert "__" not in tpl, "unsubstituted placeholder left in os_list.json"
+
+          out = pathlib.Path(os.environ["GITHUB_WORKSPACE"], "release-assets", "os_list.json")
+          # Parse before writing: a malformed list makes Imager fail silently.
+          json.loads(tpl)
+          out.write_text(tpl)
+          print(tpl)
+          PY
+        env:
+          IMAGE_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/${{ env.IMAGE_XZ }}
+          RELEASE_DATE: ${{ steps.version.outputs.date }}
+
+      - name: Stage firmware artifacts for release
+        run: |
+          set -euo pipefail
+          FW_OUT="stitchlabos/image/src/modules/pico-firmware/filesystem/home/pi/firmware"
+          STAGE="$GITHUB_WORKSPACE/release-assets/firmware"
+          mkdir -p "$STAGE"
+          # The chroot build may have left these root-owned; take them back so
+          # the release action can read them as the runner user.
+          sudo cp "$FW_OUT"/katapult.uf2 "$FW_OUT"/klipper.bin \
+                  "$FW_OUT"/klipper.uf2 "$FW_OUT"/klipper-standalone.uf2 "$STAGE/"
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/release-assets"
+          ( cd "$STAGE" && sha256sum ./* > SHA256SUMS.txt )
+          ls -lh "$STAGE"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
@@ -119,6 +233,7 @@ jobs:
           path: |
             stitchlabos/image/src/workspace/*.img.xz
             stitchlabos/image/src/workspace/*.img.xz.sha256
+            release-assets/**
           retention-days: 7
 
       - name: Create GitHub Release
@@ -129,22 +244,86 @@ jobs:
           body: |
             ## StitchLabOS ${{ steps.version.outputs.version }}
 
-            Flash with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) using **Use custom** image. No Pi Imager customization needed — SSH, WiFi AP, and hostname are pre-configured.
+            ### 1. Flash the SD card
 
-            ### First Boot
-            - **WiFi AP**: Connect to `Stitchlab` (password: `praxistest`), then open http://stitchlab.local
+            **Recommended — StitchLabOS as a selectable OS.** Start Raspberry Pi Imager with
+            this release's OS list, then pick StitchLabOS under *Choose OS*. Hostname, WiFi
+            and SSH stay editable in the customisation dialog:
+
+            ```
+            rpi-imager --repo https://github.com/${{ github.repository }}/releases/latest/download/os_list.json
+            ```
+
+            **Alternative — direct image.** *Choose OS → Use custom*, then select the
+            `.img.xz` below. Note that Imager's customisation dialog is unavailable on this
+            path; the defaults further down apply instead.
+
+            ### 2. First boot
+
+            - **WiFi AP**: connect to `Stitchlab` (password: `praxistest`), then open http://stitchlab.local
             - **SSH**: `ssh pi@stitchlab.local` (password: `lab`)
 
+            ### 3. Commission the SKR Pico
+
+            A factory-fresh SKR Pico carries no Klipper firmware, so Klipper will report no
+            MCU until it is flashed once. This image ships the firmware — no dev machine and
+            no internet needed:
+
+            ```
+            ssh pi@stitchlab.local
+            stitchlab-flash-pico
+            ```
+
+            Hold **BOOTSEL** and plug the Pico into a USB port of the Pi when prompted. The
+            script writes Katapult over USB and Klipper over `/dev/serial0`, then verifies
+            that the MCU came up. Every later firmware update runs over the UART alone —
+            no cable, no jumper.
+
             ### Included
-            - Klipper + Moonraker (latest master at build time)
+
+            - Klipper + Moonraker (master at build time, Klipper `${{ env.KLIPPER_FW_SHA }}`)
+            - SKR Pico firmware, prebuilt: Katapult `${{ env.KATAPULT_FW_SHA }}` + matching Klipper
+              (UART0 on GPIO0/GPIO1, 115200 baud, app at `0x10004000`)
             - Mainsail v2.17.0 + StitchLAB UI (WiFi Manager, Embroidery Panel, GCode Studio)
             - TurtleStitch offline editor with Moonraker integration
+            - G-code intake: pre-flight compatibility checks and cached job thumbnails
             - WiFi Manager with AP fallback (AccessPopup)
             - Live Jog controller daemon
-            - KIAUH, Katapult bootloader
+            - KIAUH, Katapult
           files: |
             stitchlabos/image/src/workspace/*.img.xz
             stitchlabos/image/src/workspace/*.img.xz.sha256
+            release-assets/os_list.json
+            release-assets/firmware/*
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-rc') || contains(steps.version.outputs.version, '-beta') }}
           generate_release_notes: false
+
+      - name: Verify published URLs
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          # Beta1 shipped an os_list.json pointing at an asset name that was never
+          # published — a silent 404 for every user. Prove the links work before
+          # anyone downloads them.
+          LIST="$GITHUB_WORKSPACE/release-assets/os_list.json"
+          FAILED=0
+
+          # Release assets can take a moment to become downloadable.
+          sleep 20
+
+          for url in \
+            "$(jq -r '.os_list[0].url' "$LIST")" \
+            "$(jq -r '.os_list[0].icon' "$LIST")" \
+            "https://github.com/${{ github.repository }}/releases/latest/download/os_list.json"
+          do
+            code=$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "ok   $code  $url"
+            else
+              echo "::error::$code $url"
+              FAILED=1
+            fi
+          done
+
+          [ "$FAILED" = "0" ] || exit 1
