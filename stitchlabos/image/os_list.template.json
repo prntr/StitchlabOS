@@ -3,7 +3,7 @@
     {
       "name": "StitchLabOS",
       "description": "DIY embroidery machine OS with Klipper, Mainsail, TurtleStitch, and AccessPopup",
-      "icon": "https://raw.githubusercontent.com/prntr/StitchlabOS/main/stitchlabos/image/icon.png",
+      "icon": "https://raw.githubusercontent.com/prntr/StitchlabOS/__TAG__/stitchlabos/image/icon.png",
       "url": "__IMAGE_URL__",
       "extract_size": __EXTRACT_SIZE__,
       "extract_sha256": "__EXTRACT_SHA256__",

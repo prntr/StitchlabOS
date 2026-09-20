@@ -82,6 +82,11 @@ name that was never uploaded. `os_list.json` is now generated per release from
 published URL returns something other than 200. Do not reintroduce a checked-in
 `os_list.json`.
 
+**Every tag is a regular release, never a prerelease.** GitHub excludes
+prereleases from `/releases/latest/`, and README, docs and `os_list.json` users
+depend on `releases/latest/download/os_list.json`. Beta1 was a prerelease and
+that URL was a 404 for months. The workflow pins `prerelease: false` on purpose.
+
 ## What must NOT happen here
 
 - Do not commit changes to the nested repos from this folder.

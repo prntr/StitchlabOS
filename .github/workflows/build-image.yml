@@ -64,6 +64,9 @@ jobs:
 
           # Klipper for the Katapult layout — flashed over /dev/serial0.
           build_fw https://github.com/Klipper3d/klipper.git klipper-build klipper.config
+          # With a bootloader offset Klipper's rp2040 Makefile builds only
+          # klipper.bin; the uf2 rule exists but is not a default target.
+          make -C klipper-build out/klipper.uf2
           cp klipper-build/out/klipper.bin "$FW_OUT/"
           cp klipper-build/out/klipper.uf2 "$FW_OUT/"
           echo "KLIPPER_FW_SHA=$(git -C klipper-build rev-parse --short HEAD)" >> "$GITHUB_ENV"
@@ -196,6 +199,7 @@ jobs:
               "__IMAGE_DOWNLOAD_SIZE__":  os.environ["IMAGE_DOWNLOAD_SIZE"],
               "__IMAGE_DOWNLOAD_SHA256__": os.environ["IMAGE_DOWNLOAD_SHA256"],
               "__RELEASE_DATE__":         os.environ["RELEASE_DATE"],
+              "__TAG__":                  os.environ["RELEASE_TAG"],
           }
           for k, v in subs.items():
               assert k in tpl, f"placeholder {k} not in template"
@@ -211,6 +215,7 @@ jobs:
         env:
           IMAGE_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/${{ env.IMAGE_XZ }}
           RELEASE_DATE: ${{ steps.version.outputs.date }}
+          RELEASE_TAG: ${{ steps.version.outputs.version }}
 
       - name: Stage the commissioning guide for release
         if: startsWith(github.ref, 'refs/tags/')
@@ -279,7 +284,7 @@ jobs:
             and SSH stay editable in the customisation dialog:
 
             ```
-            rpi-imager --repo https://github.com/${{ github.repository }}/releases/latest/download/os_list.json
+            rpi-imager --repo https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/os_list.json
             ```
 
             **Alternative — direct image.** *Choose OS → Use custom*, then select the
@@ -328,7 +333,10 @@ jobs:
             release-assets/COMMISSIONING.md
             release-assets/firmware/*
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.version, '-rc') || contains(steps.version.outputs.version, '-beta') }}
+          # Deliberately never a prerelease: GitHub excludes prereleases from
+          # /releases/latest/, which would leave every "latest" URL in README
+          # and docs pointing at nothing while the project is in beta.
+          prerelease: false
           generate_release_notes: false
 
       - name: Verify published URLs
@@ -344,9 +352,13 @@ jobs:
           # Release assets can take a moment to become downloadable.
           sleep 20
 
+          # Both the tag-pinned URLs (release text) and the /latest/ URL (README,
+          # docs) must work. /latest/ only resolves because prerelease is false.
           for url in \
             "$(jq -r '.os_list[0].url' "$LIST")" \
             "$(jq -r '.os_list[0].icon' "$LIST")" \
+            "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/os_list.json" \
+            "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/COMMISSIONING.md" \
             "https://github.com/${{ github.repository }}/releases/latest/download/os_list.json"
           do
             code=$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || echo 000)
