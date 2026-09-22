@@ -6,10 +6,11 @@ Mistral). `CLAUDE.md` is a symlink to it — edit `AGENTS.md` only, never the sy
 <!-- BEGIN _STD:SHARED_REFERENCES -->
 ## Shared references
 
-Before changing this project, read both shared sources:
-
-- Code layout and house rules: `~/Code/_std/AGENTS.base.md`
-- Cross-project delivery pipeline: `~/Code/active/plattform/pipeline.md`
+- House rules and Code layout: `~/Code/_std/AGENTS.base.md`. Claude Code and Codex
+  load it as their global instructions; do not read it a second time. Only an agent
+  without a global instruction file reads it from here.
+- Delivery pipeline: `~/Code/active/plattform/pipeline.md`. Read it before deploying
+  or touching devices or the network; local-only work does not need it.
 
 This managed block is checked by `~/Code/_std/bin/agents-doctor`; keep its markers intact.
 <!-- END _STD:SHARED_REFERENCES -->
