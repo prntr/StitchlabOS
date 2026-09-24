@@ -56,7 +56,9 @@ and lessons carry forward, its implementation does not.
 | `StitchHEAD` | Firmware for the SKR Pico as drive head, TMC2209 over UART | **Open problem**: UART configuration of the TMC2209s works under no Arduino framework tried. Read its `PROBLEM_ANALYSIS.md` before building anything there. |
 | `MKSdrivemini` | MKS XDrive Mini, BLDC closed loop — groundwork for the sewing motor | Bring-up phase, deliberately minimal |
 | `KlipperLiveControl` | ESP-NOW link: handheld → dongle → `live_jogd` → Moonraker | Part of StitchLabOS; `live_jogd` ships in this image |
-| `PCBs`, `eez-projects` | Circuit boards and instrumentation | Supporting work |
+| `PCBs`, `eez-projects` | Circuit boards and instrumentation; `PCBs/boards/StitchPCB` is the CM5 + RP2350 + CAN controller draft | Supporting work |
+| `MotorStudio` | macOS app; its Needle workbench drives the MKS XDrive needle tests | Workbench built, live plots open |
+| `SLStudio` | SquareLine/LVGL touch UIs for LilyGo AMOLED (ESP32-S3), incl. a CNC pad | Dormant |
 
 ### Model and simulation
 
@@ -64,7 +66,7 @@ and lessons carry forward, its implementation does not.
 |---|---|---|
 | `stitchLABsim` | Thread take-up and stitch formation model after Manoilenko et al. (2024), as a package | Supply side complete, demand side open |
 | `stitchlabPROdev` | Exploratory groundwork for the same model, Pfaff cam analysis | Scripts, no package — `stitchLABsim` is the tidied form |
-| `StatorTwin` | Motor-side modelling | Standalone |
+| `StatorTwin` | Motor-side modelling, PCB-stator sizing for the toolhead drives | Standalone, no Git remote |
 
 ### From image to stitch
 
@@ -86,7 +88,7 @@ and lessons carry forward, its implementation does not.
 
 | Project | Role | State |
 |---|---|---|
-| `OpenRSS` | Open Robotic Sewing System — hardware-agnostic sewing and textile robotics platform | Planning phase 0–1. `README.md`, `architecture.md`, `roadmap.md`, `docs/adr/` |
+| `OpenRSS` | Open Robotic Sewing System — hardware-agnostic sewing and textile robotics platform | Rust core with planner v0.3 and a simulator; Phase 5 started on the simulator track. `README.md`, `roadmap.md`, `docs/adr/`, scope proposal in `docs/system-scope-v0.md` |
 
 OpenRSS is not a renamed Klipper setup. It targets several coordinated actuators
 — needle, take-up lever, hook, feed, thread tension, cutters — the needle phase
@@ -96,6 +98,17 @@ the realtime core is investigated in
 
 Classic stays a first-class target throughout: OpenRSS is meant to run on the
 same cheap hardware, with its own motion core instead of Klipper.
+
+The robotic sewing toolhead ("StitchLAB Robot") has no repo of its own. Its
+pieces are `StitchHEAD` (firmware), `MKSdrivemini` and `MotorStudio` (BLDC
+needle drive), `PCBs/boards/StitchPCB` (controller), `StatorTwin` (motors) and
+`stitchlabPROdev` (fly-by-wire concept, Pfaff cam data). OpenRSS collects them
+in `docs/system-scope-v0.md`.
+
+Every file outside OpenRSS that OpenRSS reads is listed, with the commit read,
+in `OpenRSS/docs/sources.md`. Move or rename such a file only together with that
+ledger. Knowledge that several of these repos need belongs in
+`~/Code/active/wissen`, not in any one of them.
 
 ---
 

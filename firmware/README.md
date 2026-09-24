@@ -41,6 +41,10 @@ The baud rate must equal `baud:` under `[mcu]` in
 Klipper's own default is 250000, so leaving `CONFIG_SERIAL_BAUD` out would
 produce firmware that builds cleanly and then never answers.
 
+The full board pinout, including the clash between this UART and the Hybrid
+encoder's documented I2C pins, is kept in
+`~/Code/active/wissen/electronics/skr-pico-v1.md`.
+
 ## Changing a config
 
 Edit the seed, never a generated `.config`. CI runs `make olddefconfig` and then
