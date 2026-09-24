@@ -1,0 +1,14 @@
+[Unit]
+Description=StitchLabOS - patch Moonraker allowed service control
+Documentation=Reports&Plans/Cross-Platform Mainsail Stabilitiy.md
+ConditionPathExists=/home/pi/moonraker/moonraker/components/machine.py
+Before=moonraker.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/stitchlab-moonraker-service-control-patch
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

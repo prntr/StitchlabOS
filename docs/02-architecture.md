@@ -24,8 +24,8 @@
 │  └────────────┬─────────────┘    └─────────────────┬──────────────────┘ │
 │               │ G-code via Moonraker               │ WebSocket :7150    │
 └───────────────┼────────────────────────────────────┼────────────────────┘
-                │                                    │ (not yet implemented)
-                ▼                                    ▼
+                │                                    │ user-gated: started
+                ▼                                    ▼ on demand via menu
 ┌───────────────────────────┐        ┌────────────────────────────────────┐
 │  Moonraker (Port 7125)    │◄───────│  live_jogd.py                      │
 │  Klipper                  │  HTTP  │  USB Serial ↔ Binary Protocol      │ 
@@ -79,11 +79,11 @@ Macros use `G92` to hide physical Z movement from the logical position.
 |-----------|--------|-------|
 | EmbroideryControlPanel | Done | Works via Moonraker |
 | Klipper Macros | Done | All macros functional |
-| live_jogd daemon | Done | Serial + HTTP working |
+| live_jogd daemon | Done | Serial + HTTP/WebSocket working; installed inactive and started from Controller menu |
 | StitchLabDongle | Done | ESP-NOW + Serial API |
 | StitchLabController | Done | LVGL UI + joystick |
-| TheControllerMenu UI | Partial | UI done, needs WebSocket backend |
-| Browser ↔ live_jogd | Missing | WebSocket :7150 not implemented |
+| TheControllerMenu UI | Done | User-gated lifecycle; Live Control Gate (enable/disable motion), per-peer controller-type selector (unknown/gamepad/foot_pedal), motion-block-reason display |
+| Browser ↔ live_jogd | Done | `controllerWebSocket.ts` — user-initiated; service started/stopped via Moonraker service-control; Live Control state synced from daemon |
 | WebMCP Agent Bridge | Done | Dev-mode AI agent integration via MCP |
 | AS5600 Encoder | Prototype | Python module tested on stitchlab04 |
 | Pogo gantry detection | Planning | [docs/hybrid/POGO_CONNECTOR.md](hybrid/POGO_CONNECTOR.md) |

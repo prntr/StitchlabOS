@@ -18,12 +18,53 @@ systemctl status nginx moonraker klipper
 
 Bridges StitchLabDongle (USB) to Moonraker (HTTP).
 
+Runtime model:
+- Installed on every image, but intentionally not enabled at boot.
+- Expected boot state is `static` + `inactive`.
+- The Mainsail Controller menu starts/stops it through Moonraker `machine.services.*`.
+- Port `7150` only listens while the service is active.
+
 ```bash
+# Expected before the user clicks Connect Controller
+systemctl is-enabled live_jogd       # static
+systemctl is-active live_jogd || true # inactive
+
+# Start/stop through Moonraker, same path used by Mainsail
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"service":"live_jogd"}' \
+  http://localhost:7125/machine/services/start
+
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"service":"live_jogd"}' \
+  http://localhost:7125/machine/services/stop
+
+# Runtime diagnostics
 systemctl status live_jogd
 journalctl -u live_jogd -f
+ss -ltnp | grep ':7150'
+ls -la /dev/stitchlab-dongle
 ```
 
-Install: `KlipperLiveControl/live_jogd/live_jogd.service`
+Service-control prerequisites:
+- `/home/pi/printer_data/moonraker.asvc` must contain `live_jogd`.
+- `stitchlab-moonraker-service-control-patch.service` must be enabled on current Moonraker builds. Without it, Moonraker can read `moonraker.asvc` but still reject inactive `static` services with `Service 'live_jogd' not installed`.
+- If service-control still fails after an update, run `/usr/local/bin/stitchlab-moonraker-service-control-patch` and restart Moonraker.
+
+```bash
+grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo allowed
+systemctl is-enabled stitchlab-moonraker-service-control-patch.service
+sudo /usr/local/bin/stitchlab-moonraker-service-control-patch
+sudo systemctl restart moonraker
+```
+
+Python dependencies are installed into `/home/pi/live_jogd/venv` from `requirements.txt` and include `pyserial`, `aiohttp`, and `websockets`.
+
+Live Control timing:
+- `LINK_TIMEOUT_S=0.200` zeroes motion state and blocks movement promptly after a short active-controller frame gap.
+- `LIVE_CONTROL_LINK_TIMEOUT_S=2.0` disables the explicit Live Control gate after sustained link loss.
+- Serial errors or CRC mismatches can still indicate dongle/controller link noise and should be checked in `journalctl -u live_jogd`.
+
+Install source: `stitchlabos/image/src/modules/live-jogd/`
 
 ## TurtleStitch Offline
 

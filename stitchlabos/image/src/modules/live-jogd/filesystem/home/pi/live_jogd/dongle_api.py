@@ -4,6 +4,7 @@ Minimal dongle API client for querying the ESP32-C3 dongle over serial.
 """
 
 import argparse
+import json
 import time
 import serial
 
@@ -85,6 +86,8 @@ def main():
                         help="Persist current dongle settings to NVS")
     parser.add_argument("--watch", type=float, default=0.0,
                         help="Poll interval in seconds (0 = once)")
+    parser.add_argument("--json", action="store_true",
+                        help="Output machine-readable JSON")
     args = parser.parse_args()
 
     if args.clear_peers:
@@ -131,34 +134,70 @@ def main():
             info = parse_dongle_info(data)
             if not info:
                 raise SystemExit("Failed to parse dongle info.")
-            print(f"MAC: {info.mac}")
-            print(f"FW: {info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}")
-            print(f"Channel: {info.esp_now_channel}")
-            print(f"WiFi: {'on' if info.wifi_enabled else 'off'}")
-            print(f"Controllers: {info.controller_count}")
-            print(f"LED brightness: {info.led_brightness}")
+            if args.json:
+                print(json.dumps({
+                    "protocol_version": info.protocol_version,
+                    "firmware_version": (
+                        f"{info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}"
+                    ),
+                    "mac": info.mac,
+                    "esp_now_channel": info.esp_now_channel,
+                    "wifi_enabled": bool(info.wifi_enabled),
+                    "controller_count": info.controller_count,
+                    "led_brightness": info.led_brightness,
+                }))
+            else:
+                print(f"MAC: {info.mac}")
+                print(f"FW: {info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}")
+                print(f"Channel: {info.esp_now_channel}")
+                print(f"WiFi: {'on' if info.wifi_enabled else 'off'}")
+                print(f"Controllers: {info.controller_count}")
+                print(f"LED brightness: {info.led_brightness}")
         elif args.query == "status":
             status = parse_dongle_status(data)
             if not status:
                 raise SystemExit("Failed to parse dongle status.")
-            print(f"Uptime: {status.uptime_ms} ms")
-            print(f"Packets RX: {status.packets_rx}")
-            print(f"Packets TX: {status.packets_tx}")
-            print(f"CRC errors: {status.crc_errors}")
-            print(f"Link: {status.link_status}")
-            print(f"Pairing: {status.pairing_mode}")
-            print(f"RSSI: {status.rssi}")
+            if args.json:
+                print(json.dumps({
+                    "uptime_seconds": status.uptime_ms // 1000,
+                    "packets_rx": status.packets_rx,
+                    "packets_tx": status.packets_tx,
+                    "crc_errors": status.crc_errors,
+                    "link_active": bool(status.link_status),
+                    "pairing_mode": bool(status.pairing_mode),
+                    "rssi": status.rssi,
+                }))
+            else:
+                print(f"Uptime: {status.uptime_ms} ms")
+                print(f"Packets RX: {status.packets_rx}")
+                print(f"Packets TX: {status.packets_tx}")
+                print(f"CRC errors: {status.crc_errors}")
+                print(f"Link: {status.link_status}")
+                print(f"Pairing: {status.pairing_mode}")
+                print(f"RSSI: {status.rssi}")
         else:
             peers = parse_peer_list(data)
             if peers is None:
                 raise SystemExit("Failed to parse peers.")
-            if not peers:
+            if args.json:
+                print(json.dumps([
+                    {
+                        "slot_id": peer.slot_id,
+                        "mac": peer.mac,
+                        "active": bool(peer.active),
+                        "last_seen": peer.last_seen,
+                        "packet_count": peer.packets,
+                    }
+                    for peer in peers
+                ]))
+            elif not peers:
                 print("No peers.")
-            for peer in peers:
-                print(
-                    f"slot={peer.slot_id} mac={peer.mac} active={peer.active} "
-                    f"last_seen={peer.last_seen} packets={peer.packets}"
-                )
+            else:
+                for peer in peers:
+                    print(
+                        f"slot={peer.slot_id} mac={peer.mac} active={peer.active} "
+                        f"last_seen={peer.last_seen} packets={peer.packets}"
+                    )
 
         if args.watch <= 0:
             break

@@ -13,7 +13,7 @@ import signal
 import sys
 import time
 import json
-from typing import Optional, Set
+from typing import Optional, Set, Tuple
 
 import websockets
 from websockets.server import serve as ws_serve
@@ -52,10 +52,13 @@ class LiveJogDaemon:
         # State tracking
         self.running = False
         self.last_frame_time = 0.0
+        self.last_active_frame_time = 0.0
         self.last_jog_time = 0.0
         self.last_z_time = 0.0
         self.last_status_time = 0.0
         self.status_seq = 0
+        self.link_timed_out = False
+        self.live_control_enabled = False
 
         # Current joystick state
         self.current_vx = 0.0
@@ -94,6 +97,7 @@ class LiveJogDaemon:
             "rssi": -50
         }
         self.peers = []
+        self.controller_type_overrides = {}
 
     async def start(self):
         """Start the daemon."""
@@ -157,6 +161,199 @@ class LiveJogDaemon:
         except serial.SerialException as e:
             logger.error(f"Failed to open serial port: {e}")
             raise
+
+    # ==================== Controller Policy ====================
+
+    def _zero_motion_state(self):
+        """Clear any active controller motion state."""
+        self.current_vx = 0.0
+        self.current_vy = 0.0
+        self.current_deadman = False
+
+    def _normalise_controller_type(self, value) -> str:
+        """Return a safe controller type string from firmware/config/UI data."""
+        if isinstance(value, int):
+            type_by_id = {
+                1: config.CONTROLLER_TYPE_GAMEPAD,
+                2: config.CONTROLLER_TYPE_FOOT_PEDAL,
+            }
+            return type_by_id.get(value, config.CONTROLLER_TYPE_UNKNOWN)
+
+        if isinstance(value, str):
+            candidate = value.strip().lower().replace("-", "_")
+            if candidate in config.VALID_CONTROLLER_TYPES:
+                return candidate
+
+        return config.CONTROLLER_TYPE_UNKNOWN
+
+    def _normalise_mac(self, mac: str) -> str:
+        """Normalise a MAC address for config-map lookups."""
+        return (mac or "").strip().upper()
+
+    def _controller_type_for_peer(self, peer: dict) -> str:
+        """Resolve controller type from UI override, firmware, or config."""
+        slot_id = int(peer.get("slot_id", 0))
+        if slot_id in self.controller_type_overrides:
+            return self.controller_type_overrides[slot_id]
+
+        mac = self._normalise_mac(peer.get("mac", ""))
+        if mac in getattr(config, "CONTROLLER_TYPE_BY_MAC", {}):
+            return self._normalise_controller_type(config.CONTROLLER_TYPE_BY_MAC[mac])
+
+        oui = ":".join(mac.split(":")[:3]) if mac else ""
+        if oui in getattr(config, "CONTROLLER_TYPE_BY_OUI", {}):
+            return self._normalise_controller_type(config.CONTROLLER_TYPE_BY_OUI[oui])
+
+        for key in ("controller_type", "peer_type", "type"):
+            if key in peer:
+                return self._normalise_controller_type(peer.get(key))
+
+        return config.CONTROLLER_TYPE_UNKNOWN
+
+    def _prepare_peer(self, peer: dict) -> dict:
+        """Return a peer dict with stable frontend fields and safe defaults."""
+        prepared = dict(peer)
+        prepared["slot_id"] = int(prepared.get("slot_id", 0))
+        prepared["mac"] = self._normalise_mac(prepared.get("mac", ""))
+        prepared["active"] = bool(prepared.get("active", False))
+        prepared["last_seen"] = int(prepared.get("last_seen", 0))
+        prepared["packet_count"] = int(prepared.get("packet_count", prepared.get("packets", 0)))
+        prepared["controller_type"] = self._controller_type_for_peer(prepared)
+        return prepared
+
+    def _prepare_peers(self):
+        """Normalise all known peers in-place."""
+        self.peers = [self._prepare_peer(peer) for peer in self.peers]
+
+    def _active_peer(self) -> Optional[dict]:
+        """Return the currently selected peer, if any."""
+        self._prepare_peers()
+        for peer in self.peers:
+            if peer.get("active", False):
+                return peer
+        return None
+
+    def _active_controller_type(self) -> str:
+        """Return the active peer type or unknown."""
+        peer = self._active_peer()
+        if not peer:
+            return config.CONTROLLER_TYPE_UNKNOWN
+        return peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+
+    def _active_link_healthy(self) -> bool:
+        """Check whether the selected controller has a recent frame."""
+        if self.last_active_frame_time <= 0:
+            return False
+        return time.monotonic() - self.last_active_frame_time <= config.LINK_TIMEOUT_S
+
+    def _touch_controller_peer(self, controller_id: int):
+        """Update or create peer state for a received controller frame."""
+        self._prepare_peers()
+        peer = next((p for p in self.peers if int(p.get("slot_id", 0)) == controller_id), None)
+        if peer is None:
+            peer = {
+                "slot_id": controller_id,
+                "mac": "",
+                "active": not any(p.get("active", False) for p in self.peers),
+                "last_seen": int(time.time()),
+                "packet_count": 0,
+            }
+            self.peers.append(peer)
+
+        peer["last_seen"] = int(time.time())
+        peer["packet_count"] = int(peer.get("packet_count", 0)) + 1
+        peer["controller_type"] = self._controller_type_for_peer(peer)
+
+    def _frame_from_active_controller(self, controller_id: int) -> bool:
+        """Return true when a joystick frame belongs to the active peer."""
+        peer = self._active_peer()
+        return peer is not None and int(peer.get("slot_id", 0)) == controller_id
+
+    def _controller_supports_action(self, controller_type: str, action: str) -> bool:
+        """Policy table for per-type movement and macro permissions."""
+        if controller_type == config.CONTROLLER_TYPE_GAMEPAD:
+            return action in ("xy", "z", "home", "stitch", "needle", "any")
+
+        if controller_type == config.CONTROLLER_TYPE_FOOT_PEDAL:
+            return action in ("stitch", "needle", "any")
+
+        return False
+
+    def _can_enable_live_control(self) -> Tuple[bool, str]:
+        """Check static requirements for switching Live Control on."""
+        if not self.dongle_connected:
+            return False, "dongle_disconnected"
+
+        peer = self._active_peer()
+        if not peer:
+            return False, "no_active_controller"
+
+        controller_type = peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+        if not self._controller_supports_action(controller_type, "any"):
+            return False, "unknown_controller"
+
+        return True, ""
+
+    async def _set_live_control(self, enabled: bool, reason: str) -> Tuple[bool, str]:
+        """Enable/disable Live Control. Disabled always clears motion state."""
+        if enabled:
+            allowed, block_reason = self._can_enable_live_control()
+            if not allowed:
+                self._zero_motion_state()
+                self.live_control_enabled = False
+                logger.warning(f"Live Control enable rejected: {block_reason}")
+                return False, block_reason
+
+            self.live_control_enabled = True
+            logger.info(f"Live Control enabled ({reason})")
+            return True, ""
+
+        if self.live_control_enabled:
+            logger.info(f"Live Control disabled ({reason})")
+        self.live_control_enabled = False
+        self._zero_motion_state()
+        return True, ""
+
+    def _can_run_motion_action(self, action: str) -> Tuple[bool, str]:
+        """Check dynamic requirements before any movement or movement macro."""
+        if not self.live_control_enabled:
+            return False, "live_control_off"
+
+        peer = self._active_peer()
+        if not peer:
+            return False, "no_active_controller"
+
+        controller_type = peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+        if not self._controller_supports_action(controller_type, action):
+            if controller_type == config.CONTROLLER_TYPE_UNKNOWN:
+                return False, "unknown_controller"
+            return False, "unsupported_controller_type"
+
+        if not self._active_link_healthy():
+            return False, "link_inactive"
+
+        if not self.printer_idle:
+            return False, "printer_busy"
+
+        return True, ""
+
+    async def _reject_motion_action(self, action: str, reason: str):
+        """Log a rejected motion action without generating G-code."""
+        logger.warning(f"Motion action '{action}' rejected: {reason}")
+
+    def _motion_block_reason(self) -> str:
+        """Return the current UI-facing reason that motion is blocked."""
+        if not self.live_control_enabled:
+            return "live_control_off"
+
+        allowed, reason = self._can_run_motion_action("any")
+        if not allowed:
+            return reason
+
+        if config.REQUIRE_HOMED and not ('x' in self.homed_axes and 'y' in self.homed_axes):
+            return "not_homed"
+
+        return ""
 
     # ==================== Dongle API Commands ====================
 
@@ -247,13 +444,44 @@ class LiveJogDaemon:
     async def _dongle_select_controller(self, slot_id: int) -> bool:
         """Select active controller (local only for now)."""
         try:
+            self._prepare_peers()
+            active_peer = self._active_peer()
+            if active_peer and int(active_peer.get("slot_id", 0)) == slot_id:
+                return True
+
             for peer in self.peers:
                 peer["active"] = (peer["slot_id"] == slot_id)
+            await self._set_live_control(False, "controller selection changed")
             logger.info(f"Selected controller slot {slot_id}")
             return True
         except Exception as e:
             logger.error(f"Select controller exception: {e}")
             return False
+
+    async def _dongle_set_controller_type(self, slot_id: int, controller_type: str) -> bool:
+        """Set a runtime-only controller type override."""
+        normalised_type = self._normalise_controller_type(controller_type)
+        self._prepare_peers()
+        peer = next((p for p in self.peers if int(p.get("slot_id", 0)) == slot_id), None)
+        previous_type = (
+            peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+            if peer
+            else config.CONTROLLER_TYPE_UNKNOWN
+        )
+
+        self.controller_type_overrides[slot_id] = normalised_type
+        self._prepare_peers()
+
+        active_peer = self._active_peer()
+        if (
+            active_peer
+            and int(active_peer.get("slot_id", 0)) == slot_id
+            and previous_type != normalised_type
+        ):
+            await self._set_live_control(False, "controller type changed")
+
+        logger.info(f"Controller slot {slot_id} type set to {normalised_type}")
+        return True
 
     async def _dongle_query_loop(self):
         """Periodically query dongle for real status data."""
@@ -305,7 +533,7 @@ class LiveJogDaemon:
                     try:
                         peers = json.loads(stdout.decode())
                         if isinstance(peers, list):
-                            self.peers = peers
+                            self.peers = [self._prepare_peer(peer) for peer in peers]
                     except json.JSONDecodeError:
                         pass
 
@@ -320,9 +548,12 @@ class LiveJogDaemon:
         logger.info(f"Starting WebSocket server on port {port}")
 
         async def handler(websocket):
+            had_clients = bool(self.ws_clients)
             self.ws_clients.add(websocket)
             logger.info(f"WebSocket client connected. Total: {len(self.ws_clients)}")
             try:
+                if not had_clients:
+                    await self._set_live_control(False, "first websocket client connected")
                 # Send initial status
                 await self._ws_send_status(websocket)
                 
@@ -383,6 +614,29 @@ class LiveJogDaemon:
                 }))
                 if success:
                     await self._ws_broadcast_status()
+
+            elif msg_type == "set_controller_type":
+                slot_id = int(data.get("slot_id", data.get("value", 0)))
+                controller_type = data.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+                success = await self._dongle_set_controller_type(slot_id, controller_type)
+                await websocket.send(json.dumps({
+                    "type": "command_response",
+                    "command": "controller_type",
+                    "success": success
+                }))
+                if success:
+                    await self._ws_broadcast_status()
+
+            elif msg_type == "live_control":
+                enabled = bool(data.get("value", False))
+                success, reason = await self._set_live_control(enabled, "websocket")
+                await websocket.send(json.dumps({
+                    "type": "command_response",
+                    "command": "live_control",
+                    "success": success,
+                    "error": reason
+                }))
+                await self._ws_broadcast_status()
             
             elif msg_type == "led":
                 brightness = data.get("value", 128)
@@ -446,23 +700,24 @@ class LiveJogDaemon:
     def _build_ws_status(self) -> dict:
         """Build status dict for WebSocket."""
         # Update dongle_status based on current state
-        self.dongle_status["link_active"] = (
-            time.monotonic() - self.last_frame_time < config.LINK_TIMEOUT_S
-            if self.last_frame_time > 0 else False
-        )
+        self.dongle_status["link_active"] = self._active_link_healthy()
         
         # Check if we have an active controller
+        self._prepare_peers()
         has_active = any(p.get("active", False) for p in self.peers)
         if not has_active and self.last_frame_time > 0:
             # Auto-create a peer if we're receiving data
             if not self.peers:
                 self.peers = [{
                     "slot_id": 0,
-                    "mac": "AA:BB:CC:DD:EE:FF",
+                    "mac": "",
                     "active": True,
                     "last_seen": int(time.time()),
                     "packet_count": self.dongle_status.get("packets_rx", 0)
                 }]
+                self._prepare_peers()
+
+        motion_block_reason = self._motion_block_reason()
         
         return {
             "type": "status",
@@ -470,6 +725,10 @@ class LiveJogDaemon:
             "dongle_info": self.dongle_info,
             "dongle_status": self.dongle_status,
             "peers": self.peers,
+            "live_control_enabled": self.live_control_enabled,
+            "active_controller_type": self._active_controller_type(),
+            "motion_enabled": self.live_control_enabled and motion_block_reason == "",
+            "motion_block_reason": motion_block_reason,
             "joystick": {
                 "vx": self.current_vx,
                 "vy": self.current_vy,
@@ -511,6 +770,12 @@ class LiveJogDaemon:
         self.dongle_status["packets_rx"] = self.dongle_status.get("packets_rx", 0) + 1
 
         if isinstance(frame, JoystickFrame):
+            self._touch_controller_peer(frame.controller_id)
+            if not self._frame_from_active_controller(frame.controller_id):
+                return
+
+            self.last_active_frame_time = self.last_frame_time
+            self.link_timed_out = False
             await self._handle_joystick(frame)
         elif isinstance(frame, HeartbeatFrame):
             self._handle_heartbeat(frame)
@@ -537,26 +802,54 @@ class LiveJogDaemon:
         """Handle UI action from controller."""
         if action == config.UI_ACT_HOME_ALL:
             logger.info("UI Action: Home All")
-            await self.moonraker.home("xyz")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("xyz")
+            else:
+                await self._reject_motion_action("home_all", reason)
         elif action == config.UI_ACT_HOME_XY:
             logger.info("UI Action: Home XY")
-            await self.moonraker.home("xy")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("xy")
+            else:
+                await self._reject_motion_action("home_xy", reason)
         elif action == config.UI_ACT_HOME_X:
             logger.info("UI Action: Home X")
-            await self.moonraker.home("x")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("x")
+            else:
+                await self._reject_motion_action("home_x", reason)
         elif action == config.UI_ACT_HOME_Y:
             logger.info("UI Action: Home Y")
-            await self.moonraker.home("y")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("y")
+            else:
+                await self._reject_motion_action("home_y", reason)
         elif action == config.UI_ACT_HOME_Z:
             logger.info("UI Action: Home Z")
-            await self.moonraker.home("z")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("z")
+            else:
+                await self._reject_motion_action("home_z", reason)
         elif action == config.UI_ACT_STITCH:
             logger.info("UI Action: Stitch")
-            await self.moonraker.run_macro("STITCH")
+            allowed, reason = self._can_run_motion_action("stitch")
+            if allowed:
+                await self.moonraker.run_macro("STITCH")
+            else:
+                await self._reject_motion_action("stitch", reason)
         elif action == config.UI_ACT_MACRO:
             if value == config.MACRO_NEEDLE_TOGGLE:
                 logger.info("UI Action: Needle Toggle")
-                await self.moonraker.run_macro("NEEDLE_TOGGLE")
+                allowed, reason = self._can_run_motion_action("needle")
+                if allowed:
+                    await self.moonraker.run_macro("NEEDLE_TOGGLE")
+                else:
+                    await self._reject_motion_action("needle_toggle", reason)
             else:
                 logger.info("UI Action: Macro %d", value)
 
@@ -565,20 +858,28 @@ class LiveJogDaemon:
         # Detect rising edges
         rising = buttons & ~self.prev_buttons
 
+        # Button SELECT: Emergency Stop stays available regardless of Live Control.
+        if rising & config.BTN_SELECT:
+            logger.warning("Button SELECT: EMERGENCY STOP")
+            await self.moonraker.emergency_stop()
+
         # Button B: Stitch
         if rising & config.BTN_B:
             logger.info("Button B: STITCH")
-            await self.moonraker.run_macro("STITCH")
+            allowed, reason = self._can_run_motion_action("stitch")
+            if allowed:
+                await self.moonraker.run_macro("STITCH")
+            else:
+                await self._reject_motion_action("stitch", reason)
 
         # Button X: Home
         if rising & config.BTN_X:
             logger.info("Button X: HOME XYZ")
-            await self.moonraker.home("xyz")
-
-        # Button SELECT: Emergency Stop
-        if rising & config.BTN_SELECT:
-            logger.warning("Button SELECT: EMERGENCY STOP")
-            await self.moonraker.emergency_stop()
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("xyz")
+            else:
+                await self._reject_motion_action("home_xyz", reason)
 
         # Button A/Y: Z movement (continuous while held)
         if buttons & config.BTN_A:
@@ -591,6 +892,11 @@ class LiveJogDaemon:
         # Rate limit Z movement
         now = time.monotonic()
         if now - self.last_z_time < 0.1:  # Max 10 Hz for Z
+            return
+
+        allowed, reason = self._can_run_motion_action("z")
+        if not allowed:
+            await self._reject_motion_action("z", reason)
             return
 
         if config.REQUIRE_HOMED and 'z' not in self.homed_axes:
@@ -629,6 +935,10 @@ class LiveJogDaemon:
 
     async def _can_jog(self) -> bool:
         """Check if jogging is allowed."""
+        allowed, _reason = self._can_run_motion_action("xy")
+        if not allowed:
+            return False
+
         # Require deadman for X/Y movement
         if config.DEADMAN_REQUIRED and not self.current_deadman:
             return False
@@ -686,8 +996,8 @@ class LiveJogDaemon:
 
             controller_active = (
                 self.current_deadman
-                or (self.last_frame_time > 0
-                    and now - self.last_frame_time < config.CONTROLLER_ACTIVE_TIMEOUT_S)
+                or (self.last_active_frame_time > 0
+                    and now - self.last_active_frame_time < config.CONTROLLER_ACTIVE_TIMEOUT_S)
             )
             interval = (
                 config.STATUS_INTERVAL_S
@@ -765,14 +1075,25 @@ class LiveJogDaemon:
             now = time.monotonic()
 
             # Check for link timeout
-            if self.last_frame_time > 0:
-                elapsed = now - self.last_frame_time
+            if self.last_active_frame_time > 0:
+                elapsed = now - self.last_active_frame_time
                 if elapsed > config.LINK_TIMEOUT_S:
-                    logger.warning(f"Link timeout! No frame for {elapsed:.3f}s")
-                    # Reset velocity to stop movement
-                    self.current_vx = 0
-                    self.current_vy = 0
-                    self.current_deadman = False
+                    if not self.link_timed_out:
+                        logger.warning(f"Link timeout! No active-controller frame for {elapsed:.3f}s")
+                        self._zero_motion_state()
+                        await self._ws_broadcast_status()
+                        self.link_timed_out = True
+                    else:
+                        self._zero_motion_state()
+
+                live_control_timeout = getattr(
+                    config,
+                    "LIVE_CONTROL_LINK_TIMEOUT_S",
+                    max(2.0, config.LINK_TIMEOUT_S),
+                )
+                if self.live_control_enabled and elapsed > live_control_timeout:
+                    await self._set_live_control(False, "sustained link timeout")
+                    await self._ws_broadcast_status()
 
             await asyncio.sleep(0.05)  # Check every 50ms
 

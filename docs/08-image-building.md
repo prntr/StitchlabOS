@@ -16,7 +16,7 @@ StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS) (
 | KIAUH | Klipper management tool |
 | Katapult | MCU bootloader |
 | AccessPopup | WiFi AP fallback mode |
-| live_jogd | USB serial bridge |
+| live_jogd | USB serial bridge, installed but started by the Controller menu on demand |
 
 ### SKR Pico firmware is part of the image
 
@@ -215,7 +215,11 @@ ssh pi@192.168.50.5
 
 ```bash
 ssh pi@stitchlab.local
-systemctl status nginx moonraker klipper live_jogd
+systemctl status nginx moonraker klipper
+systemctl is-enabled live_jogd       # expected: static
+systemctl is-active live_jogd || true # expected: inactive until Controller-menu connect
+grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo live_jogd-allowed
+systemctl is-enabled stitchlab-moonraker-service-control-patch.service
 systemctl list-timers | grep AccessPopup
 ls /dev/serial0   # UART for SKR Pico — must exist
 tail -5 /home/pi/printer_data/logs/klippy.log

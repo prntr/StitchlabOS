@@ -32,6 +32,28 @@ Z_FEEDRATE = 600  # mm/min
 DEADMAN_REQUIRED = True       # Require deadman button for X/Y movement
 REQUIRE_HOMED = True          # Only allow jogging when homed
 LINK_TIMEOUT_S = 0.200        # Emergency stop if no frame for 200ms
+LIVE_CONTROL_LINK_TIMEOUT_S = 2.0
+# Link gaps above LINK_TIMEOUT_S immediately zero motion and block movement.
+# Only a sustained gap disables the explicit Live Control gate. Normal ESP-NOW
+# jitter can exceed 200ms briefly, so using LINK_TIMEOUT_S for both made the
+# UI switch turn itself off during otherwise valid controller use.
+
+# Controller type policy. Unknown controllers stay status-only until a
+# firmware type, config mapping, or explicit UI label identifies them.
+CONTROLLER_TYPE_UNKNOWN = "unknown"
+CONTROLLER_TYPE_GAMEPAD = "gamepad"
+CONTROLLER_TYPE_FOOT_PEDAL = "foot_pedal"
+VALID_CONTROLLER_TYPES = (
+    CONTROLLER_TYPE_UNKNOWN,
+    CONTROLLER_TYPE_GAMEPAD,
+    CONTROLLER_TYPE_FOOT_PEDAL,
+)
+
+# Optional runtime classification for old firmware that does not report a
+# controller type. Keys are uppercase MACs ("AA:BB:CC:DD:EE:FF") or OUIs
+# ("AA:BB:CC"). Values must be one of VALID_CONTROLLER_TYPES.
+CONTROLLER_TYPE_BY_MAC = {}
+CONTROLLER_TYPE_BY_OUI = {}
 
 # Logging
 LOG_LEVEL = "INFO"
