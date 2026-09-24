@@ -1,6 +1,8 @@
 # 12-Pin Pogo Connector — Gantry Interface
 
-> The XY gantry connects to the StitchLAB Hybrid via a 12-pin pogo connector. Two pins are dedicated to gantry detection (sense loop). The remaining 10 pins carry motor signals and endstop inputs.
+> **Applies to: StitchLAB Hybrid only.** The base StitchLAB embroidery machine has a fixed gantry and does not use this connector or any of the gantry-detection logic described here.
+
+> The XY gantry connects to the StitchLAB Hybrid via a 12-pin pogo connector. One pin is dedicated to gantry detection (single-pin endstop-style sense). The remaining 11 pins carry motor signals, endstop inputs, and ground.
 
 ## Pin Allocation
 
@@ -15,9 +17,9 @@
 | 7 | X_ENDSTOP | Gantry → MCU | X endstop input (normally open) |
 | 8 | Y_ENDSTOP | Gantry → MCU | Y endstop input (normally open) |
 | 9 | GND | Common | Ground reference for all signals |
-| 10 | GND | Common | Ground reference (redundant for reliability) |
-| 11 | SENSE_OUT | MCU → Gantry | Sense loop output (3.3V) |
-| 12 | SENSE_IN | Gantry → MCU | Sense loop return (read by MCU GPIO) |
+| 10 | GND | Common | Ground reference (redundant, also used by sense) |
+| 11 | GANTRY_SENSE | Gantry → MCU | Single-pin sense, shorted to GND on gantry side |
+| 12 | (spare) | — | Reserved for future use |
 
 > **Note:** Motor power (12/24V) is NOT routed through the pogo connector. The stepper drivers are on the SKR Pico; only step/dir/enable signals go to the gantry. The stepper motors on the gantry receive power from their own driver outputs on the SKR Pico via a separate power cable, or the drivers are on the gantry side. **This needs hardware design finalization.**
 
@@ -34,63 +36,54 @@ Two options for the XY stepper drivers:
 
 If Option A is chosen, pins 1-6 would carry motor coil signals (high current) instead of step/dir/enable, and the pogo connector spec must be rated accordingly.
 
-## Sense Loop Circuit
+## Sense Circuit
 
-The sense loop detects whether the pogo connector is mated. It's a simple continuity check.
+Detection works exactly like a mechanical endstop: a single GPIO line is shorted to GND when the gantry is mated, and floats open when detached.
 
 ### Schematic
 
 ```
-SKR Pico (MCU side)                  Gantry PCB
-─────────────────                    ──────────
+SKR Pico (MCU side)                Gantry PCB
+─────────────────                  ──────────
 
-GPIO_SENSE_OUT ──── Pin 11 ═══╗
-   (output HIGH)               ║     ╔══ Pin 11
-                               ║     ║
-                               ╚═════╝
-                              (pogo mates)
-                               ╔═════╗
-                               ║     ║
-GPIO_SENSE_IN ───── Pin 12 ═══╝     ╚══ Pin 12
-   (input + pull-down)                │
-                                 ┌────┴────┐
-                                 │  1kΩ R  │  ← bridges Pin 11 to Pin 12
-                                 └─────────┘
-
-On MCU side:
-   GPIO_SENSE_IN has 10kΩ pull-down to GND (internal or external)
+3.3V ──[ internal pull-up ]──┐
+                             │
+GPIO_GANTRY_SENSE ──── Pin 11 ═══╗
+   (input)                        ║     ╔══ Pin 11 ──┐
+                                  ╚═════╝            │ (direct short)
+                                 (pogo mates)        │
+                                  ╔═════╗            │
+GND ────────────────── Pin 10 ═══╝     ╚══ Pin 10 ──┘
 ```
+
+The gantry PCB simply ties pin 11 to pin 10 (GND). No resistor, no bridge — just a wire.
+
+### MCU Pin: THB (gpio27)
+
+The SKR Pico's **THB** (heated-bed thermistor) input is unused on this machine. It maps to **gpio27** and has a convenient GND pin in the same header. Reusing it:
+
+- Avoids running new wires across the board
+- Keeps the assignment obvious to anyone reading the schematic ("the unused thermistor port is now the gantry sense")
+- Frees the original sense pins from the design
+
+The pin is configured with Klipper's internal pull-up (`^gpio27`).
 
 ### Logic
 
-| Pogo State | SENSE_IN reads | Meaning |
-|------------|---------------|---------|
-| Mated | HIGH (3.3V through 1kΩ) | Gantry attached |
-| Unmated | LOW (pulled down by 10kΩ) | Gantry detached |
+| Pogo State | gpio27 reads | Meaning |
+|------------|--------------|---------|
+| Mated | LOW (shorted to GND) | Gantry attached |
+| Unmated | HIGH (pull-up) | Gantry detached |
 
-### Why a Resistor (Not a Direct Bridge)
+In Klipper's `gcode_button`, **press** = pin goes LOW, so `press_gcode` = `_GANTRY_ATTACHED` and `release_gcode` = `_GANTRY_DETACHED`.
 
-- **Current limiting:** prevents damage if pins short during mating
-- **Identification:** different resistor values could identify gantry variants (future-proofing)
-- **Debounce-friendly:** resistor + pull-down forms an RC filter with parasitic capacitance
+### Future: Multi-Gantry ID via ADC
 
-### Alternative: ADC-Based Gantry ID
-
-For future multi-gantry support, replace the digital sense with an ADC reading:
-
-| Resistor Value | ADC Reading (~) | Gantry Type |
-|----------------|-----------------|-------------|
-| Open (no gantry) | 0V | Detached |
-| 1.0kΩ | 2.97V | Standard (200×200mm) |
-| 2.2kΩ | 2.63V | Wide (300×200mm) |
-| 4.7kΩ | 2.12V | Reserved |
-| 10kΩ | 1.65V | Reserved |
-
-This uses a voltage divider: `V_sense = 3.3V × R_pull_down / (R_bridge + R_pull_down)` where R_pull_down = 10kΩ.
-
-**For now, digital sense (attached/detached) is sufficient.**
+`gpio27` is ADC-capable. If multi-gantry support is added later, the same pin can be repurposed as an analog input — different resistor values to GND on different gantries would yield different ADC readings. **Not needed for the current design**, but the pin choice keeps that door open.
 
 ## Klipper Integration
+
+> **Hybrid-only config.** The Klipper config blocks shown below must NOT be added to the shared base `printer.cfg`. They live in a separate `hybrid_macros.cfg` that is only included on Hybrid image builds. See [Build Integration](#build-integration) below.
 
 ### Option 1: Use Klipper's `[filament_switch_sensor]` Pattern
 
@@ -99,10 +92,10 @@ Klipper already has GPIO monitoring with event callbacks. The gantry sensor foll
 ```ini
 # printer.cfg
 [gcode_button gantry_detect]
-pin: ^!mcu:gpio<N>          # Active-high with external pull-down, or use ^! for active-low
-press_gcode:
+pin: ^gpio27                # THB input, internal pull-up enabled
+press_gcode:                # pin LOW = shorted to GND = gantry attached
     _GANTRY_ATTACHED
-release_gcode:
+release_gcode:              # pin HIGH = open = gantry detached
     _GANTRY_DETACHED
 ```
 
@@ -190,15 +183,71 @@ gcode:
 ### PCB Requirements
 
 - **MCU side:** Pogo pin header soldered to SKR Pico breakout or custom adapter board
-- **Gantry side:** Flat pad array matching pogo pin positions, plus 1kΩ sense bridge resistor
+- **Gantry side:** Flat pad array matching pogo pin positions, with pin 11 wired directly to pin 10 (GND)
 
-## Testing Checklist
+## Build Integration
 
-- [ ] Sense loop reads HIGH when gantry mated
-- [ ] Sense loop reads LOW within 1ms of unmating
+Gantry detection is Hybrid-only. The base StitchLAB image must not include any of this logic. The configuration follows the same pattern already used for `embroidery_macros.cfg`: source-of-truth in the [stitchlabos-config](https://github.com/prntr/stitchlabos-config) submodule, symlinked into place by the image build script.
+
+### File layout in `stitchlabos-config`
+
+```
+stitchlabos-config/
+├── printer_data/
+│   └── config/
+│       ├── embroidery_macros.cfg       # shared (base + hybrid)
+│       └── hybrid_macros.cfg           # NEW — hybrid only
+```
+
+`hybrid_macros.cfg` contains:
+- `[gcode_button gantry_detect]` (pin: `^gpio27`)
+- `[save_variables]` for `machine_mode` persistence
+- `_GANTRY_ATTACHED`, `_GANTRY_DETACHED`
+- `_REQUIRE_EMBROIDERY_MODE`, `_VALIDATE_MODE_ON_STARTUP`
+- `QUERY_MODE`, `SET_MACHINE_MODE`
+
+### Image build (start_chroot_script)
+
+In [stitchlabos/image/src/modules/stitchlabos/start_chroot_script](../../stitchlabos/image/src/modules/stitchlabos/start_chroot_script), guard the hybrid symlink behind a build flag:
+
+```bash
+# Existing (always done):
+ln -sf /home/pi/stitchlabos-config/printer_data/config/embroidery_macros.cfg \
+    /home/pi/printer_data/config/embroidery_macros.cfg
+
+# NEW — only for Hybrid builds:
+if [ "${STITCHLABOS_VARIANT:-base}" = "hybrid" ]; then
+    ln -sf /home/pi/stitchlabos-config/printer_data/config/hybrid_macros.cfg \
+        /home/pi/printer_data/config/hybrid_macros.cfg
+fi
+```
+
+### printer.cfg
+
+Two options:
+
+**A. Shared printer.cfg with conditional include** (cleaner — file just isn't there on base builds, Klipper would error on the include)
+
+```ini
+# Use [include hybrid_macros.cfg] only in a hybrid-specific printer.cfg
+```
+
+**B. Separate printer.cfg per variant** (recommended)
+
+Maintain two printer.cfg files in the image build:
+- `stitchlabos/image/src/modules/klipper/filesystem/.../printer.cfg` — base
+- `stitchlabos/image/src/modules/klipper/filesystem-hybrid/.../printer.cfg` — adds `[include hybrid_macros.cfg]`
+
+The build script copies the variant-appropriate one based on `$STITCHLABOS_VARIANT`. This keeps each printer.cfg readable and avoids Klipper conditional-include hacks.
+
+## Testing Checklist (Hybrid only)
+
+- [ ] gpio27 reads LOW when gantry mated
+- [ ] gpio27 reads HIGH within 1ms of unmating
 - [ ] `_GANTRY_DETACHED` macro fires on unmating
 - [ ] XY steppers disabled within 10ms of detach
 - [ ] `_GANTRY_ATTACHED` macro fires on mating
 - [ ] No false triggers from vibration during operation
 - [ ] Endstops read correctly through pogo
 - [ ] Step/dir signals maintain integrity through pogo at max speed
+- [ ] Base StitchLAB image build does not contain `hybrid_macros.cfg` or any gantry-detect references
