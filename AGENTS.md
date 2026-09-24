@@ -33,6 +33,11 @@ including `OpenRSS`, the planned replacement for this software stack.
 
 Read those two before proposing work that spans repos.
 
+The machines this image runs on are registered in
+`~/Code/active/plattform/geraete/stitchlab.md`: hostnames (`stitchlab.local` is the
+image default, `stitchlab04` and `stitchlabdev` are named), consumers, open points.
+Nothing there is surveyed yet. A fact about a physical machine belongs there, not here.
+
 ## Three submodules and one plain clone — check before committing
 
 | Folder | Kind | Upstream | Who owns it |

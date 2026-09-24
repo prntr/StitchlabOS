@@ -51,3 +51,6 @@ stitchlabos/image/os_list.json
 
 # CI release staging directory
 release-assets/
+
+# Local scratch area per house rules — never tracked
+.local/
