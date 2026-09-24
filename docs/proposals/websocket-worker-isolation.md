@@ -1,8 +1,8 @@
 # Proposal: Isolate Moonraker WebSocket in a Dedicated Web Worker
 
-> **Status:** Not implemented. Scoped for a future release candidate if connection reliability across diverse browsers/devices becomes a priority, or if similar reconnect symptoms reappear on customer systems beyond the ones covered by the Beta2 three-layer fix ([runbooks/ap-troubleshooting.md](runbooks/ap-troubleshooting.md#issue-5-frontend-websocket-reconnects-in-ap-mode)).
+> **Status:** P1 — not yet implemented. The P0 cross-platform stability batch (`stitchlabos/v2.17.0`) addressed all main-thread WebSocket issues short of Worker isolation: visibility/online/offline listeners, separate send/receive timestamps in the heartbeat watchdog, explicit reconnect on clean heartbeat closes, reconnects-counter reset after 60 s healthy traffic, and 30 s init-phase timeouts. LAN tests including a 30-min Chromium background soak passed with no reconnects — encouraging. **AP-mode soak (Test 3) has not yet been run**; that test is the deciding signal for whether P1-1 is required for the next release.
 >
-> **Current state (Beta2):** WebSocket runs on the main thread with a 10 s app-level keepalive. Stable in the foreground; backgrounded Chromium tabs occasionally reconnect because Chrome throttles `setInterval` in hidden tabs (intensive throttling, ~1 call/min after ~5 min). Safari is unaffected because it doesn't throttle as aggressively. Reconnects are clean (<1 s) and transparent — not a bug per se, just visible wear.
+> **Current state (v2.17.0):** WebSocket runs on the main thread. `webSocketClient.ts` has visibility/online/offline/pageshow handlers and a hardened heartbeat watchdog. The `reconnects` counter resets after 60 s of healthy traffic. An `explicitClose` flag forces reconnect even after a `wasClean=true` close from the heartbeat watchdog. A `[WebSocket]` log helper is in place. Init-component waits time out at 30 s.
 
 ---
 
