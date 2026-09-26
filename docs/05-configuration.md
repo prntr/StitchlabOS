@@ -23,7 +23,7 @@ Required runtime pieces on the Pi:
 |------|----------|
 | systemd unit | `live_jogd.service` is `static`, not enabled at boot |
 | Moonraker allow-list | `/home/pi/printer_data/moonraker.asvc` contains `live_jogd` |
-| Static-unit service patch | `stitchlab-moonraker-service-control-patch.service` enabled |
+| Unit loaded for Moonraker | `moonraker.service.d/stitchlab-live-jogd.conf` present; `live_jogd.service` LoadState `loaded` |
 | Python deps | `/home/pi/live_jogd/venv` has `pyserial`, `aiohttp`, `websockets` |
 | WebSocket | `0.0.0.0:7150` listens only while `live_jogd` is active |
 

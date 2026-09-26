@@ -219,7 +219,8 @@ systemctl status nginx moonraker klipper
 systemctl is-enabled live_jogd       # expected: static
 systemctl is-active live_jogd || true # expected: inactive until Controller-menu connect
 grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo live_jogd-allowed
-systemctl is-enabled stitchlab-moonraker-service-control-patch.service
+systemctl show -p LoadState --value live_jogd.service   # expected: loaded
+git -C /home/pi/moonraker status --porcelain   # expected: empty, or update_manager refuses updates
 systemctl list-timers | grep AccessPopup
 ls /dev/serial0   # UART for SKR Pico — must exist
 tail -5 /home/pi/printer_data/logs/klippy.log

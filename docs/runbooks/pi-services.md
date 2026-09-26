@@ -47,14 +47,14 @@ ls -la /dev/stitchlab-dongle
 
 Service-control prerequisites:
 - `/home/pi/printer_data/moonraker.asvc` must contain `live_jogd`.
-- `stitchlab-moonraker-service-control-patch.service` must be enabled on current Moonraker builds. Without it, Moonraker can read `moonraker.asvc` but still reject inactive `static` services with `Service 'live_jogd' not installed`.
-- If service-control still fails after an update, run `/usr/local/bin/stitchlab-moonraker-service-control-patch` and restart Moonraker.
+- `live_jogd.service` must be *loaded* when Moonraker starts. Moonraker only lists loaded units, and an inactive `static` unit is loaded only while something references it; without that Moonraker reads `moonraker.asvc` but still answers `Service 'live_jogd' not installed`. The drop-in `/etc/systemd/system/moonraker.service.d/stitchlab-live-jogd.conf` (`Before=live_jogd.service`) provides the reference.
+- Moonraker's own files are never patched: `update_manager` refuses to update a modified repo. `git -C /home/pi/moonraker status --porcelain` must print nothing.
 
 ```bash
 grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo allowed
-systemctl is-enabled stitchlab-moonraker-service-control-patch.service
-sudo /usr/local/bin/stitchlab-moonraker-service-control-patch
-sudo systemctl restart moonraker
+systemctl show -p LoadState --value live_jogd.service   # expected: loaded
+git -C /home/pi/moonraker status --porcelain            # expected: no output
+sudo systemctl daemon-reload && sudo systemctl restart moonraker
 ```
 
 Python dependencies are installed into `/home/pi/live_jogd/venv` from `requirements.txt` and include `pyserial`, `aiohttp`, and `websockets`.

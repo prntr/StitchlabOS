@@ -15,7 +15,7 @@ apt-get install -y avahi-daemon
 
 # Unpack system config files (dnsmasq-shared.d, etc.)
 unpack /filesystem/etc /etc root
-# Boot-time helpers under usr/local/bin; the chmod further down needs them.
+# Moonraker components under usr/local/lib/stitchlabos; symlinked below.
 unpack /filesystem/usr /usr root
 
 # Clone stitchlabos-config repo (wifi_manager, scripts, macros)
@@ -28,6 +28,8 @@ ln -sf /home/pi/stitchlabos-config/moonraker/components/wifi_manager.py \
     /home/pi/moonraker/moonraker/components/wifi_manager.py
 ln -sf /home/pi/stitchlabos-config/moonraker/components/stitchlab_intake.py \
     /home/pi/moonraker/moonraker/components/stitchlab_intake.py
+ln -sf /usr/local/lib/stitchlabos/moonraker/stitchlab_ws_tuning.py \
+    /home/pi/moonraker/moonraker/components/stitchlab_ws_tuning.py
 ln -sf /home/pi/stitchlabos-config/printer_data/config/embroidery_macros.cfg \
     /home/pi/printer_data/config/embroidery_macros.cfg
 for script in wifi_status.sh wifi_scan.sh wifi_profiles.sh; do
@@ -59,6 +61,16 @@ if ! grep -q '\[stitchlab_intake\]' /home/pi/printer_data/config/moonraker.conf 
     echo "worker_ionice: idle" >> /home/pi/printer_data/config/moonraker.conf
     echo "analyze_timeout: 60" >> /home/pi/printer_data/config/moonraker.conf
     echo "prepare_timeout: 30" >> /home/pi/printer_data/config/moonraker.conf
+fi
+
+# Add [stitchlab_ws_tuning] to moonraker.conf if not present
+if ! grep -q '\[stitchlab_ws_tuning\]' /home/pi/printer_data/config/moonraker.conf 2>/dev/null; then
+    echo "" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# === STITCHLABOS: WebSocket ping tuning ===" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# Tolerates Wi-Fi jitter in AP mode; see docs/runbooks/ap-troubleshooting.md Issue 5." >> /home/pi/printer_data/config/moonraker.conf
+    echo "[stitchlab_ws_tuning]" >> /home/pi/printer_data/config/moonraker.conf
+    echo "websocket_ping_interval: 30" >> /home/pi/printer_data/config/moonraker.conf
+    echo "websocket_ping_timeout: 25" >> /home/pi/printer_data/config/moonraker.conf
 fi
 
 # Configure Avahi for wlan0 only (prevents mDNS issues in AP mode)
@@ -112,25 +124,12 @@ fi
 # .git/info/exclude provides local-only git ignore rules — never overwritten by git pull.
 echo "moonraker/components/wifi_manager.py" >> /home/pi/moonraker/.git/info/exclude
 echo "moonraker/components/stitchlab_intake.py" >> /home/pi/moonraker/.git/info/exclude
+echo "moonraker/components/stitchlab_ws_tuning.py" >> /home/pi/moonraker/.git/info/exclude
 
-# Patch Moonraker's Tornado WebSocket ping settings to tolerate Wi-Fi jitter in AP mode.
-# Default (interval=10s, timeout=25s) disconnects browsers when the client radio briefly
-# parks and misses a PING. 30/25 gives the client a full ping cycle to reply.
-# See docs/runbooks/ap-troubleshooting.md Issue 5 and P0-11 of the Cross-Platform
-# Mainsail Stability plan.
-#
-# Apply once at image build time and re-apply on every boot via the systemd unit
-# below — otherwise update_manager would silently revert the patch on the next pull.
-chmod +x /usr/local/bin/stitchlab-moonraker-ws-ping-patch
-/usr/local/bin/stitchlab-moonraker-ws-ping-patch || true
-systemctl enable stitchlab-moonraker-ws-ping-patch.service
-
-# Allow Moonraker service control for explicitly allowed inactive static units
-# such as live_jogd.service. Without this, moonraker.asvc is read but
-# machine.services.start rejects live_jogd before systemd can load the unit.
-chmod +x /usr/local/bin/stitchlab-moonraker-service-control-patch
-/usr/local/bin/stitchlab-moonraker-service-control-patch || true
-systemctl enable stitchlab-moonraker-service-control-patch.service
+# Never edit Moonraker's tracked files here: update_manager refuses to update
+# a modified repo ("Update aborted, repo has been modified"). WebSocket ping
+# tuning is the stitchlab_ws_tuning component above; service control for the
+# inactive live_jogd unit is a moonraker.service drop-in in the live-jogd module.
 
 # Install post-Klipper Wi-Fi powersave-off unit (baked by filesystem/, just enable it)
 systemctl enable wlan0-powersave-off.service

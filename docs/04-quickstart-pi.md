@@ -31,8 +31,8 @@ ssh pi@stitchlab.local "grep -l 'PaperScope' /home/pi/mainsail/assets/*"
 
 # live_jogd
 ssh pi@stitchlab.local "systemctl is-enabled live_jogd; systemctl is-active live_jogd || true"
-ssh pi@stitchlab.local "grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && systemctl is-enabled stitchlab-moonraker-service-control-patch.service"
-# Expected before Controller-menu connect: static + inactive; patch service enabled.
+ssh pi@stitchlab.local "grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && systemctl show -p LoadState --value live_jogd.service"
+# Expected before Controller-menu connect: static + inactive; allowed and loaded.
 
 # WiFi manager
 curl http://stitchlab.local:7125/server/wifi/status
