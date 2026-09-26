@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# stitchlab-clone-at-ref URL BRANCH REF DEST
+#
+# Clone BRANCH of URL into DEST with BRANCH set to commit REF.
+#
+# Image modules use this to ship exactly the commit CI resolved: the Pico
+# firmware and the host Klipper must come from the same commit, and a
+# submodule pin must rebuild the same image. REF must be on origin/BRANCH,
+# and the checkout stays BRANCH tracking origin/BRANCH: Moonraker's
+# update_manager rejects a detached HEAD or a diverged branch. The clone
+# starts shallow and deepens only until REF is reachable, so a REF a few
+# commits behind the branch tip costs a few commits, not the full history.
+set -euo pipefail
+
+if [ "$#" -ne 4 ]; then
+    echo "usage: $(basename "$0") URL BRANCH REF DEST" >&2
+    exit 2
+fi
+url=$1 branch=$2 ref=$3 dest=$4
+
+# CI resolves REF shortly before the image build, so it is at most a few
+# commits behind the tip. Give up after 1000 rather than fetching all of a
+# large history for a commit that is not there.
+max_deepen=20
+
+git clone --depth=1 --branch "$branch" "$url" "$dest"
+cd "$dest"
+deepened=0
+while ! git merge-base --is-ancestor "$ref" "origin/$branch" 2>/dev/null; do
+    if [ "$(git rev-parse --is-shallow-repository)" != "true" ] || [ "$deepened" -ge "$max_deepen" ]; then
+        echo "ERROR: $ref is not on origin/$branch of $url (searched $((deepened * 50 + 1)) commits)" >&2
+        exit 1
+    fi
+    git fetch -q --deepen=50 origin "$branch"
+    deepened=$((deepened + 1))
+done
+git reset -q --hard "$ref"
+echo "$dest: $branch at $(git rev-parse --short HEAD) ($(git rev-list --count HEAD.."origin/$branch") behind origin/$branch)"

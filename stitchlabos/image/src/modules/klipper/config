@@ -4,6 +4,9 @@
 # Klipper repository
 export KLIPPER_REPO="https://github.com/Klipper3d/klipper.git"
 export KLIPPER_BRANCH="master"
+# Klipper commit to install: the one CI built the SKR Pico firmware from
+# (build-image.yml passes it). Host and MCU must run the same commit.
+export KLIPPER_REF="${KLIPPER_REF:-}"
 
 # Moonraker repository
 export MOONRAKER_REPO="https://github.com/Arksine/moonraker.git"

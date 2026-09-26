@@ -7,9 +7,11 @@ source /common.sh
 
 echo "=== StitchLabOS: Installing Katapult ==="
 
-# Clone Katapult
-echo "Cloning Katapult..."
-sudo -u pi git clone --depth=1 ${KATAPULT_REPO} ${KATAPULT_DIR}
+# Clone Katapult at the commit katapult.uf2 was built from:
+# stitchlab-flash-pico drives that bootloader with this checkout's flashtool.py.
+: "${KATAPULT_REF:?not set - CI passes the commit it built katapult.uf2 from (build-image.yml)}"
+echo "Cloning Katapult at ${KATAPULT_REF}..."
+sudo -u pi /usr/local/bin/stitchlab-clone-at-ref "${KATAPULT_REPO}" master "${KATAPULT_REF}" "${KATAPULT_DIR}"
 
 # Note: Katapult requires manual configuration via 'make menuconfig'
 # and building for specific MCU targets. This is left to the user.

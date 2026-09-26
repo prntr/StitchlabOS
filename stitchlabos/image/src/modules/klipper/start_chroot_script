@@ -23,9 +23,17 @@ apt-get install -y \
 id -u pi &>/dev/null || useradd -m -s /bin/bash pi
 usermod -aG dialout,tty,video pi
 
-# Clone Klipper (shallow; docs kept — removing tracked files causes "Repo is dirty" in Moonraker)
-echo "Cloning Klipper..."
-sudo -u pi git clone --depth=1 ${KLIPPER_REPO} ${KLIPPER_DIR}
+# stitchlab-clone-at-ref is used by this and the later modules to clone at
+# the commit CI resolved; unpack it before the first clone.
+unpack /filesystem/usr /usr root
+chmod +x /usr/local/bin/stitchlab-clone-at-ref
+
+# Clone Klipper at the commit the SKR Pico firmware was built from, so host
+# and MCU match (shallow; docs kept — removing tracked files causes
+# "Repo is dirty" in Moonraker).
+: "${KLIPPER_REF:?not set - CI passes the commit it built the Pico firmware from (build-image.yml)}"
+echo "Cloning Klipper at ${KLIPPER_REF}..."
+sudo -u pi /usr/local/bin/stitchlab-clone-at-ref "${KLIPPER_REPO}" "${KLIPPER_BRANCH}" "${KLIPPER_REF}" "${KLIPPER_DIR}"
 
 # Clone Moonraker (shallow)
 echo "Cloning Moonraker..."

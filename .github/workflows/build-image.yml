@@ -69,6 +69,10 @@ jobs:
           make -C klipper-build out/klipper.uf2
           cp klipper-build/out/klipper.bin "$FW_OUT/"
           cp klipper-build/out/klipper.uf2 "$FW_OUT/"
+          # The image installs host Klipper and Katapult's flashtool at exactly
+          # these commits (Build image step), so host and MCU always match.
+          echo "KLIPPER_REF=$(git -C klipper-build rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "KATAPULT_REF=$(git -C katapult-build rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "KLIPPER_FW_SHA=$(git -C klipper-build rev-parse --short HEAD)" >> "$GITHUB_ENV"
           echo "KATAPULT_FW_SHA=$(git -C katapult-build rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
@@ -179,6 +183,8 @@ jobs:
             DIST_PATH="$GITHUB_WORKSPACE/stitchlabos/image/src" \
             CUSTOM_PI_OS_PATH="$GITHUB_WORKSPACE/CustomPiOS/src" \
             STITCHLABOS_CONFIG_REF="$STITCHLABOS_CONFIG_REF" \
+            KLIPPER_REF="$KLIPPER_REF" \
+            KATAPULT_REF="$KATAPULT_REF" \
             bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
         timeout-minutes: 90
 
@@ -350,8 +356,8 @@ jobs:
 
             ### Included
 
-            - Klipper + Moonraker (master at build time, Klipper `${{ env.KLIPPER_FW_SHA }}`)
-            - SKR Pico firmware, prebuilt: Katapult `${{ env.KATAPULT_FW_SHA }}` + matching Klipper
+            - Klipper `${{ env.KLIPPER_FW_SHA }}` on the Pi and in the SKR Pico firmware (same commit); Moonraker master at build time
+            - SKR Pico firmware, prebuilt: Katapult `${{ env.KATAPULT_FW_SHA }}` (bootloader and the Pi's flashtool) + matching Klipper
               (UART0 on GPIO0/GPIO1, 115200 baud, app at `0x10004000`)
             - Mainsail v2.17.0 + StitchLAB UI (WiFi Manager, Embroidery Panel, GCode Studio)
             - TurtleStitch offline editor with Moonraker integration (`${{ env.TURTLESTITCH_SHA }}`)
