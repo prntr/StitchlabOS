@@ -19,7 +19,12 @@ import websockets
 from websockets.server import serve as ws_serve
 
 from serial_protocol import (
-    FrameParser, FrameBuilder, StatusFrame, JoystickFrame, HeartbeatFrame
+    FrameParser, FrameBuilder, StatusFrame, JoystickFrame, HeartbeatFrame,
+    ResponseFrame, parse_dongle_info, parse_dongle_status, parse_peer_list,
+    dongle_info_to_dict, dongle_status_to_dict, peer_info_to_dict,
+    MSG_TYPE_QUERY, MSG_TYPE_COMMAND, QUERY_INFO, QUERY_STATUS, QUERY_PEERS,
+    CMD_WIFI_ENABLE, CMD_ENTER_PAIRING, CMD_EXIT_PAIRING, CMD_CLEAR_PEERS,
+    RESP_OK,
 )
 from moonraker_client import MoonrakerClient
 import config
@@ -98,6 +103,11 @@ class LiveJogDaemon:
         }
         self.peers = []
         self.controller_type_overrides = {}
+
+        # One outstanding dongle query/command at a time; the read loop
+        # resolves the pending future when the matching response arrives.
+        self._dongle_lock = asyncio.Lock()
+        self._dongle_pending: Optional[Tuple[int, int, asyncio.Future]] = None
 
     async def start(self):
         """Start the daemon."""
@@ -357,47 +367,79 @@ class LiveJogDaemon:
 
     # ==================== Dongle API Commands ====================
 
+    async def _dongle_request(self, frame: bytes, response_to: int,
+                              request_id: int) -> Optional[bytes]:
+        """Send a query/command on the daemon's own port and await the reply.
+
+        While live_jogd runs it must be the only user of the dongle port: a
+        second process (dongle_api.py) flushes the shared input queue and
+        consumes the bytes the read loop needs, dropping joystick frames.
+        Returns the response payload, or None on timeout, error status or a
+        closed port.
+        """
+        if not self.serial_port or not self.serial_port.is_open:
+            return None
+
+        async with self._dongle_lock:
+            future = asyncio.get_running_loop().create_future()
+            self._dongle_pending = (response_to, request_id, future)
+            try:
+                self.serial_port.write(frame)
+                response = await asyncio.wait_for(
+                    future, config.DONGLE_REQUEST_TIMEOUT_S)
+            except serial.SerialException as e:
+                logger.error(f"Dongle request 0x{response_to:02X}/0x{request_id:02X} failed: {e}")
+                return None
+            except asyncio.TimeoutError:
+                logger.debug(f"Dongle request 0x{response_to:02X}/0x{request_id:02X} timed out")
+                return None
+            finally:
+                self._dongle_pending = None
+
+        if response.status != RESP_OK:
+            logger.warning(
+                f"Dongle request 0x{response_to:02X}/0x{request_id:02X} "
+                f"returned status 0x{response.status:02X}")
+            return None
+        return response.data
+
+    def _resolve_dongle_response(self, frame: ResponseFrame):
+        """Hand a response frame to the request waiting for it, if any."""
+        pending = self._dongle_pending
+        if pending is None:
+            return
+        response_to, request_id, future = pending
+        if (frame.response_to == response_to and frame.id == request_id
+                and not future.done()):
+            future.set_result(frame)
+
+    async def _dongle_query(self, query_id: int) -> Optional[bytes]:
+        return await self._dongle_request(
+            FrameBuilder.build_query(query_id), MSG_TYPE_QUERY, query_id)
+
+    async def _dongle_command(self, cmd_id: int, param: int = 0) -> bool:
+        data = await self._dongle_request(
+            FrameBuilder.build_command(cmd_id, param), MSG_TYPE_COMMAND, cmd_id)
+        return data is not None
+
     async def _dongle_set_wifi(self, enabled: bool) -> bool:
-        """Set WiFi state via dongle_api.py."""
-        try:
-            cmd = ['python3', DONGLE_API_PATH, '--wifi', 'on' if enabled else 'off']
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                self.dongle_info["wifi_enabled"] = enabled
-                logger.info(f"WiFi set to {'on' if enabled else 'off'}")
-                return True
-            else:
-                logger.error(f"WiFi command failed: {stderr.decode()}")
-                return False
-        except Exception as e:
-            logger.error(f"WiFi command exception: {e}")
+        """Enable or disable ESP-NOW/WiFi on the dongle."""
+        if not await self._dongle_command(CMD_WIFI_ENABLE, 1 if enabled else 0):
+            logger.error(f"WiFi command failed ({'on' if enabled else 'off'})")
             return False
+        self.dongle_info["wifi_enabled"] = enabled
+        logger.info(f"WiFi set to {'on' if enabled else 'off'}")
+        return True
 
     async def _dongle_set_pairing(self, enabled: bool) -> bool:
-        """Set pairing mode via dongle_api.py."""
-        try:
-            cmd = ['python3', DONGLE_API_PATH, '--pairing', 'on' if enabled else 'off']
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                self.dongle_status["pairing_mode"] = enabled
-                logger.info(f"Pairing mode set to {'on' if enabled else 'off'}")
-                return True
-            else:
-                logger.error(f"Pairing command failed: {stderr.decode()}")
-                return False
-        except Exception as e:
-            logger.error(f"Pairing command exception: {e}")
+        """Enter or leave pairing mode."""
+        cmd = CMD_ENTER_PAIRING if enabled else CMD_EXIT_PAIRING
+        if not await self._dongle_command(cmd):
+            logger.error(f"Pairing command failed ({'on' if enabled else 'off'})")
             return False
+        self.dongle_status["pairing_mode"] = enabled
+        logger.info(f"Pairing mode set to {'on' if enabled else 'off'}")
+        return True
 
     async def _dongle_set_led(self, brightness: int) -> bool:
         """Set LED brightness via dongle_api.py."""
@@ -421,25 +463,13 @@ class LiveJogDaemon:
             return False
 
     async def _dongle_clear_peers(self) -> bool:
-        """Clear all peers via dongle_api.py."""
-        try:
-            cmd = ['python3', DONGLE_API_PATH, '--clear-peers']
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                self.peers = []
-                logger.info("Peers cleared")
-                return True
-            else:
-                logger.error(f"Clear peers command failed: {stderr.decode()}")
-                return False
-        except Exception as e:
-            logger.error(f"Clear peers command exception: {e}")
+        """Clear all stored controller pairings."""
+        if not await self._dongle_command(CMD_CLEAR_PEERS):
+            logger.error("Clear peers command failed")
             return False
+        self.peers = []
+        logger.info("Peers cleared")
+        return True
 
     async def _dongle_select_controller(self, slot_id: int) -> bool:
         """Select active controller (local only for now)."""
@@ -483,59 +513,46 @@ class LiveJogDaemon:
         logger.info(f"Controller slot {slot_id} type set to {normalised_type}")
         return True
 
+    def _merge_dongle_peers(self, peers: list):
+        """Replace the peer list from the dongle, keeping the local selection.
+
+        The dongle's ``active`` flag is its own view of a slot, not the
+        controller the user selected in the UI. Motion gating trusts the
+        selection (_active_peer), so the dongle must never change it.
+        """
+        selected = self._active_peer()
+        selected_slot = int(selected["slot_id"]) if selected else None
+        merged = [self._prepare_peer(peer) for peer in peers]
+        if selected_slot is None:
+            # Nothing selected yet: adopt the dongle's first active slot.
+            first = next((p for p in merged if p["active"]), None)
+            selected_slot = first["slot_id"] if first else None
+        for peer in merged:
+            peer["active"] = peer["slot_id"] == selected_slot
+        self.peers = merged
+
     async def _dongle_query_loop(self):
         """Periodically query dongle for real status data."""
         while self.running:
             await asyncio.sleep(5)  # Query every 5 seconds
             if not self.dongle_connected:
                 continue
-            
+
             try:
-                # Query info
-                cmd = ['python3', DONGLE_API_PATH, '--query', 'info', '--json']
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0 and stdout:
-                    try:
-                        info = json.loads(stdout.decode())
-                        self.dongle_info.update(info)
-                    except json.JSONDecodeError:
-                        pass
+                data = await self._dongle_query(QUERY_INFO)
+                info = parse_dongle_info(data) if data is not None else None
+                if info:
+                    self.dongle_info.update(dongle_info_to_dict(info))
 
-                # Query status
-                cmd = ['python3', DONGLE_API_PATH, '--query', 'status', '--json']
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0 and stdout:
-                    try:
-                        status = json.loads(stdout.decode())
-                        self.dongle_status.update(status)
-                    except json.JSONDecodeError:
-                        pass
+                data = await self._dongle_query(QUERY_STATUS)
+                status = parse_dongle_status(data) if data is not None else None
+                if status:
+                    self.dongle_status.update(dongle_status_to_dict(status))
 
-                # Query peers
-                cmd = ['python3', DONGLE_API_PATH, '--query', 'peers', '--json']
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0 and stdout:
-                    try:
-                        peers = json.loads(stdout.decode())
-                        if isinstance(peers, list):
-                            self.peers = [self._prepare_peer(peer) for peer in peers]
-                    except json.JSONDecodeError:
-                        pass
+                data = await self._dongle_query(QUERY_PEERS)
+                peers = parse_peer_list(data) if data is not None else None
+                if peers is not None:
+                    self._merge_dongle_peers([peer_info_to_dict(p) for p in peers])
 
             except Exception as e:
                 logger.debug(f"Dongle query exception: {e}")
@@ -779,6 +796,8 @@ class LiveJogDaemon:
             await self._handle_joystick(frame)
         elif isinstance(frame, HeartbeatFrame):
             self._handle_heartbeat(frame)
+        elif isinstance(frame, ResponseFrame):
+            self._resolve_dongle_response(frame)
 
     async def _handle_joystick(self, frame: JoystickFrame):
         """Process joystick frame."""

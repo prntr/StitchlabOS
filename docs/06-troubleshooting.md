@@ -19,7 +19,7 @@
 | "Service 'live_jogd' not installed" | First verify `/home/pi/printer_data/moonraker.asvc` contains `live_jogd`. If it does, Moonraker did not see the unit at startup: it only lists *loaded* units, and an inactive `static` unit stays loaded only through `/etc/systemd/system/moonraker.service.d/stitchlab-live-jogd.conf`. Check `systemctl show -p LoadState --value live_jogd.service` (expected `loaded`), restore the drop-in if missing, run `sudo systemctl daemon-reload`, then restart Moonraker. |
 | Live Control switches off by itself | A sustained controller-link gap exceeded `LIVE_CONTROL_LINK_TIMEOUT_S` (2.0 s by default), or a service/client reset disabled the safety gate. Check `journalctl -u live_jogd | grep -E 'sustained link timeout|Serial read error|CRC mismatch'`. Short gaps above `LINK_TIMEOUT_S` (200 ms) should only zero/block motion, not flip the Live Control switch off. |
 | Motion blocked after enabling Live Control | Check the block-reason text below the Live Control toggle. Common causes: `link_inactive`, no active controller selected, controller type still set to "Unknown", machine not homed, printer busy, or Live Control disabled. |
-| WS errors in console | Confirm the service is running and port `7150` is listening; then check `journalctl -u live_jogd -f`. Use CLI diagnostics from `/home/pi/live_jogd`: `./venv/bin/python3 dongle_api.py --query status`. |
+| WS errors in console | Confirm the service is running and port `7150` is listening; then check `journalctl -u live_jogd -f`. While the service runs, the Controller menu shows the dongle's info, status and peers (live_jogd polls them every 5 s). `dongle_api.py` is for a stopped service only: it opens the dongle port a second time and drops the daemon's frames. |
 
 ## Embroidery Panel
 
@@ -61,7 +61,9 @@ grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo allowed
 systemctl show -p LoadState --value live_jogd.service   # expected: loaded
 ss -ltnp | grep ':7150'              # only while live_jogd is active
 
-# Query dongle directly
+# Query dongle directly — only with live_jogd stopped; a second process on
+# the port drops the daemon's joystick frames
+sudo systemctl stop live_jogd
 cd /home/pi/live_jogd
 ./venv/bin/python3 dongle_api.py --query status
 ```

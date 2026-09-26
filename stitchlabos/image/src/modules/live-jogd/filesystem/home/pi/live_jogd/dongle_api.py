@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 Minimal dongle API client for querying the ESP32-C3 dongle over serial.
+
+Standalone tool: do not run it while live_jogd is active. It opens the
+dongle port a second time and flushes its input, which drops the frames
+live_jogd is reading. live_jogd talks to the dongle over its own
+connection instead (LiveJogDaemon._dongle_request).
 """
 
 import argparse
@@ -15,6 +20,9 @@ from serial_protocol import (
     parse_dongle_info,
     parse_dongle_status,
     parse_peer_list,
+    dongle_info_to_dict,
+    dongle_status_to_dict,
+    peer_info_to_dict,
     QUERY_INFO,
     QUERY_STATUS,
     QUERY_PEERS,
@@ -135,17 +143,7 @@ def main():
             if not info:
                 raise SystemExit("Failed to parse dongle info.")
             if args.json:
-                print(json.dumps({
-                    "protocol_version": info.protocol_version,
-                    "firmware_version": (
-                        f"{info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}"
-                    ),
-                    "mac": info.mac,
-                    "esp_now_channel": info.esp_now_channel,
-                    "wifi_enabled": bool(info.wifi_enabled),
-                    "controller_count": info.controller_count,
-                    "led_brightness": info.led_brightness,
-                }))
+                print(json.dumps(dongle_info_to_dict(info)))
             else:
                 print(f"MAC: {info.mac}")
                 print(f"FW: {info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}")
@@ -158,15 +156,7 @@ def main():
             if not status:
                 raise SystemExit("Failed to parse dongle status.")
             if args.json:
-                print(json.dumps({
-                    "uptime_seconds": status.uptime_ms // 1000,
-                    "packets_rx": status.packets_rx,
-                    "packets_tx": status.packets_tx,
-                    "crc_errors": status.crc_errors,
-                    "link_active": bool(status.link_status),
-                    "pairing_mode": bool(status.pairing_mode),
-                    "rssi": status.rssi,
-                }))
+                print(json.dumps(dongle_status_to_dict(status)))
             else:
                 print(f"Uptime: {status.uptime_ms} ms")
                 print(f"Packets RX: {status.packets_rx}")
@@ -180,16 +170,7 @@ def main():
             if peers is None:
                 raise SystemExit("Failed to parse peers.")
             if args.json:
-                print(json.dumps([
-                    {
-                        "slot_id": peer.slot_id,
-                        "mac": peer.mac,
-                        "active": bool(peer.active),
-                        "last_seen": peer.last_seen,
-                        "packet_count": peer.packets,
-                    }
-                    for peer in peers
-                ]))
+                print(json.dumps([peer_info_to_dict(peer) for peer in peers]))
             elif not peers:
                 print("No peers.")
             else:

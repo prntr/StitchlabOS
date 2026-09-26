@@ -6,6 +6,7 @@ live_jogd Configuration
 SERIAL_PORT = "/dev/stitchlab-dongle"
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT = 0.1  # seconds
+DONGLE_REQUEST_TIMEOUT_S = 2.0  # Wait for a query/command response frame
 
 # Moonraker API
 MOONRAKER_HOST = "localhost"

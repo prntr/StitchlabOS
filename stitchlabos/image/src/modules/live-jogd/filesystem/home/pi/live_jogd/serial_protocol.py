@@ -240,6 +240,45 @@ def parse_peer_list(data: bytes) -> Optional[list[PeerInfo]]:
     return peers
 
 
+def dongle_info_to_dict(info: DongleInfo) -> dict:
+    """DongleInfo in the shape live_jogd sends to the UI."""
+    return {
+        "protocol_version": info.protocol_version,
+        "firmware_version": (
+            f"{info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}"
+        ),
+        "mac": info.mac,
+        "esp_now_channel": info.esp_now_channel,
+        "wifi_enabled": bool(info.wifi_enabled),
+        "controller_count": info.controller_count,
+        "led_brightness": info.led_brightness,
+    }
+
+
+def dongle_status_to_dict(status: DongleStatus) -> dict:
+    """DongleStatus in the shape live_jogd sends to the UI."""
+    return {
+        "uptime_seconds": status.uptime_ms // 1000,
+        "packets_rx": status.packets_rx,
+        "packets_tx": status.packets_tx,
+        "crc_errors": status.crc_errors,
+        "link_active": bool(status.link_status),
+        "pairing_mode": bool(status.pairing_mode),
+        "rssi": status.rssi,
+    }
+
+
+def peer_info_to_dict(peer: PeerInfo) -> dict:
+    """PeerInfo in the shape live_jogd sends to the UI."""
+    return {
+        "slot_id": peer.slot_id,
+        "mac": peer.mac,
+        "active": bool(peer.active),
+        "last_seen": peer.last_seen,
+        "packet_count": peer.packets,
+    }
+
+
 class FrameParser:
     """
     Parses incoming serial frames from dongle.
