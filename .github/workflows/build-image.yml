@@ -100,9 +100,35 @@ jobs:
 
       - name: Prepare TurtleStitch
         run: |
-          mkdir -p stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch
-          # Use /. (dot) to include hidden files like .git — update_manager needs .git for git pull
-          cp -r turtlestitch/. stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch/
+          set -euo pipefail
+          # Ship a standalone repo, not a copy of the submodule: checkout leaves
+          # the submodule with a .git *file* (gitdir: ../.git/modules/turtlestitch)
+          # and a detached HEAD, which Moonraker's update_manager rejects on the Pi.
+          # Instead: `master` on the pinned commit, tracking origin/master.
+          # ORIGIN and BRANCH must match [update_manager turtlestitch] in moonraker.conf.
+          SRC="$GITHUB_WORKSPACE/turtlestitch"
+          DEST="$GITHUB_WORKSPACE/stitchlabos/image/src/modules/turtlestitch/filesystem/home/pi/turtlestitch"
+          ORIGIN="https://github.com/prntr/turtlestitch.git"
+          BRANCH="master"
+          REF="$(git -C "$SRC" rev-parse HEAD)"
+          git -C "$SRC" fetch --quiet origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+          if ! git -C "$SRC" merge-base --is-ancestor "$REF" "origin/${BRANCH}"; then
+            echo "::error::turtlestitch ${REF} is not on origin/${BRANCH}. Push the submodule commit to ${BRANCH} before building."
+            exit 1
+          fi
+          # Full history is ~1.4 GB. Clone just deep enough to reach the pin from
+          # origin/master, so the branch is visibly behind rather than diverged.
+          DEPTH="$(( $(git -C "$SRC" rev-list --count "${REF}..origin/${BRANCH}") + 1 ))"
+          rm -rf "$DEST"
+          git init --quiet --initial-branch="$BRANCH" "$DEST"
+          git -C "$DEST" fetch --quiet --no-tags --depth="$DEPTH" "file://${SRC}" \
+            "+refs/remotes/origin/${BRANCH}:refs/remotes/origin/${BRANCH}"
+          # -t: fetch only master later too; the other branches would pull the full history.
+          git -C "$DEST" remote add -t "$BRANCH" origin "$ORIGIN"
+          git -C "$DEST" checkout --quiet -B "$BRANCH" "$REF"
+          git -C "$DEST" branch --quiet --set-upstream-to="origin/${BRANCH}" "$BRANCH"
+          git -C "$DEST" status -sb | head -1
+          echo "TURTLESTITCH_SHA=$(git -C "$DEST" rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - name: Install build dependencies
         run: |
@@ -321,7 +347,7 @@ jobs:
             - SKR Pico firmware, prebuilt: Katapult `${{ env.KATAPULT_FW_SHA }}` + matching Klipper
               (UART0 on GPIO0/GPIO1, 115200 baud, app at `0x10004000`)
             - Mainsail v2.17.0 + StitchLAB UI (WiFi Manager, Embroidery Panel, GCode Studio)
-            - TurtleStitch offline editor with Moonraker integration
+            - TurtleStitch offline editor with Moonraker integration (`${{ env.TURTLESTITCH_SHA }}`)
             - G-code intake: pre-flight compatibility checks and cached job thumbnails
             - WiFi Manager with AP fallback (AccessPopup)
             - Live Jog controller daemon

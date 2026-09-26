@@ -7,9 +7,22 @@ source /common.sh
 
 echo "=== StitchLabOS: Installing TurtleStitch ==="
 
-# Unpack nginx config and pre-copied TurtleStitch files (copied by CI before chroot)
+# Unpack nginx config and the TurtleStitch repo (prepared by CI before chroot)
 unpack /filesystem/etc /etc root
 unpack /filesystem/home/pi /home/pi pi
+
+# update_manager ([update_manager turtlestitch], primary_branch master) only
+# updates a clean repo on master tracking origin/master. Catch a regression in
+# CI's "Prepare TurtleStitch" step here instead of on a deployed machine.
+TS_BRANCH="$(sudo -u pi git -C /home/pi/turtlestitch symbolic-ref --short -q HEAD || true)"
+TS_UPSTREAM="$(sudo -u pi git -C /home/pi/turtlestitch rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+if [ ! -d /home/pi/turtlestitch/.git ] || [ "$TS_BRANCH" != master ] \
+        || [ "$TS_UPSTREAM" != origin/master ] \
+        || [ -n "$(sudo -u pi git -C /home/pi/turtlestitch status --porcelain)" ]; then
+    echo "ERROR: /home/pi/turtlestitch is not a clean clone on master tracking origin/master"
+    echo "       (branch '${TS_BRANCH}', upstream '${TS_UPSTREAM}')."
+    exit 1
+fi
 
 # Enable turtlestitch site
 ln -sf /etc/nginx/sites-available/turtlestitch /etc/nginx/sites-enabled/turtlestitch

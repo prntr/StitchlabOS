@@ -106,7 +106,7 @@ GitHub Actions builds on tags (`v*`) and manual dispatch. **Never** on every pus
 
 1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail` and `prntr/turtlestitch`)
 2. Build Mainsail: `npm ci && npm run build`, copy `dist/` → `modules/mainsail/filesystem/home/pi/mainsail/`
-3. Copy TurtleStitch submodule → `modules/turtlestitch/filesystem/home/pi/turtlestitch/`
+3. Prepare TurtleStitch as a standalone repo in `modules/turtlestitch/filesystem/home/pi/turtlestitch/`. The submodule itself cannot be copied: checkout leaves it with a `.git` *file* (`gitdir: ../.git/modules/turtlestitch`) and a detached HEAD, which Moonraker's update_manager rejects on the Pi. The step checks that the submodule commit is on `origin/master` (fails otherwise), then builds a shallow clone from the local submodule — just deep enough to reach that commit from `origin/master` — with `master` checked out on the commit, tracking `origin/master` on `https://github.com/prntr/turtlestitch.git`. The remote fetches `master` only (`remote add -t master`): the other branches would pull the full ~1.4 GB history on the Pi's first update check. The turtlestitch module's `start_chroot_script` fails the build if the unpacked repo is not a clean `master` tracking `origin/master`.
 4. Install host dependencies (including `gitpython` for CustomPiOS's `execution_order.py`)
 5. Clone CustomPiOS (`--depth=1`)
 6. Download Raspberry Pi OS Lite arm64 (`.img.xz`) into `stitchlabos/image/src/image-raspberrypiarm64/` — **this exact path is required** by CustomPiOS's `generate_board_config.py` which searches `$DIST_PATH/image-{BOARD}/` for `*.xz` files to set `BASE_ZIP_IMG`. The image is also **expanded to 6GB** before recompressing: Pi OS Lite only has ~1.5GB free on its rootfs which isn't enough for Klipper/Moonraker deps + pip virtualenvs. Expansion: `truncate -s 6G img` → `parted resizepart 2 100%` → `losetup -P` → `e2fsck -fy` + `resize2fs` → `xz -1 -T0`.
@@ -151,7 +151,7 @@ stitchlabos/image/src/
     ├── katapult/                   # Katapult bootloader
     ├── accesspopup/                # AP mode fallback
     ├── mainsail/                   # nginx config; dist files copied by CI
-    ├── turtlestitch/               # nginx config; files copied by CI
+    ├── turtlestitch/               # nginx config; git repo prepared by CI
     ├── live-jogd/                  # USB serial daemon
     └── stitchlabos/                # Final customizations (wifi_manager, macros, hostname)
 ```
