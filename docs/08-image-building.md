@@ -63,7 +63,7 @@ with `stitchlab-flash-pico --uart` to clear the version-mismatch warning.
 ## GitHub Repository
 
 - Repo: `https://github.com/prntr/StitchlabOS`
-- Main submodules: `mainsail` → `prntr/mainsail` (branch `stitchlabos/v2.17.0`), `turtlestitch` → `prntr/turtlestitch` (branch `master`)
+- Main submodules: `mainsail` → `prntr/mainsail` (branch `stitchlabos/v2.17.0`), `turtlestitch` → `prntr/turtlestitch` (branch `master`), `stitchlabos-config` → `prntr/stitchlabos-config` (branch `main`)
 
 ## Using Pre-built Images
 
@@ -104,13 +104,13 @@ GitHub Actions builds on tags (`v*`) and manual dispatch. **Never** on every pus
 
 ### Build Steps (in order)
 
-1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail` and `prntr/turtlestitch`)
+1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail`, `prntr/turtlestitch` and `prntr/stitchlabos-config`)
 2. Build Mainsail: `npm ci && npm run build`, copy `dist/` → `modules/mainsail/filesystem/home/pi/mainsail/`
 3. Prepare TurtleStitch as a standalone repo in `modules/turtlestitch/filesystem/home/pi/turtlestitch/`. The submodule itself cannot be copied: checkout leaves it with a `.git` *file* (`gitdir: ../.git/modules/turtlestitch`) and a detached HEAD, which Moonraker's update_manager rejects on the Pi. The step checks that the submodule commit is on `origin/master` (fails otherwise), then builds a shallow clone from the local submodule — just deep enough to reach that commit from `origin/master` — with `master` checked out on the commit, tracking `origin/master` on `https://github.com/prntr/turtlestitch.git`. The remote fetches `master` only (`remote add -t master`): the other branches would pull the full ~1.4 GB history on the Pi's first update check. The turtlestitch module's `start_chroot_script` fails the build if the unpacked repo is not a clean `master` tracking `origin/master`.
 4. Install host dependencies (including `gitpython` for CustomPiOS's `execution_order.py`)
 5. Clone CustomPiOS (`--depth=1`)
 6. Download Raspberry Pi OS Lite arm64 (`.img.xz`) into `stitchlabos/image/src/image-raspberrypiarm64/` — **this exact path is required** by CustomPiOS's `generate_board_config.py` which searches `$DIST_PATH/image-{BOARD}/` for `*.xz` files to set `BASE_ZIP_IMG`. The image is also **expanded to 6GB** before recompressing: Pi OS Lite only has ~1.5GB free on its rootfs which isn't enough for Klipper/Moonraker deps + pip virtualenvs. Expansion: `truncate -s 6G img` → `parted resizepart 2 100%` → `losetup -P` → `e2fsck -fy` + `resize2fs` → `xz -1 -T0`.
-7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... bash -x .../build`
+7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... STITCHLABOS_CONFIG_REF=<submodule commit> bash -x .../build`. The `stitchlabos` module clones `stitchlabos-config` in the chroot and puts `main` on exactly that commit, so a tag rebuilds the same image. The commit must already be on `origin/main` — the build fails otherwise, because a detached or diverged checkout would block Moonraker's update_manager on the Pi.
 8. Compress output with `xz -9`, generate sha256
 9. Upload as artifact (7-day retention)
 10. Create GitHub Release on tags

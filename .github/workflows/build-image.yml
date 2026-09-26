@@ -169,10 +169,16 @@ jobs:
 
       - name: Build image
         run: |
+          set -euo pipefail
+          # The image clones stitchlabos-config inside the chroot; pin it to the
+          # submodule commit this checkout records, not whatever main is today.
+          STITCHLABOS_CONFIG_REF="$(git -C "$GITHUB_WORKSPACE/stitchlabos-config" rev-parse HEAD)"
+          echo "STITCHLABOS_CONFIG_SHA=$(git -C "$GITHUB_WORKSPACE/stitchlabos-config" rev-parse --short HEAD)" >> "$GITHUB_ENV"
           sudo modprobe loop
           sudo \
             DIST_PATH="$GITHUB_WORKSPACE/stitchlabos/image/src" \
             CUSTOM_PI_OS_PATH="$GITHUB_WORKSPACE/CustomPiOS/src" \
+            STITCHLABOS_CONFIG_REF="$STITCHLABOS_CONFIG_REF" \
             bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
         timeout-minutes: 90
 
@@ -349,7 +355,7 @@ jobs:
             - Mainsail v2.17.0 + StitchLAB UI (WiFi Manager, Embroidery Panel, GCode Studio)
             - TurtleStitch offline editor with Moonraker integration (`${{ env.TURTLESTITCH_SHA }}`)
             - G-code intake: pre-flight compatibility checks and cached job thumbnails
-            - WiFi Manager with AP fallback (AccessPopup)
+            - WiFi Manager with AP fallback (AccessPopup); stitchlabos-config `${{ env.STITCHLABOS_CONFIG_SHA }}`
             - Live Jog controller daemon
             - KIAUH, Katapult
           files: |

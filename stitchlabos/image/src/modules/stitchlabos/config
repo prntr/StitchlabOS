@@ -2,3 +2,8 @@
 # Final customizations for StitchLab embroidery machine OS
 
 export STITCHLABOS_HOSTNAME="stitchlab"
+
+# stitchlabos-config commit to ship: the meta-repo's submodule pin. CI passes
+# it from `git -C stitchlabos-config rev-parse HEAD` (see build-image.yml);
+# start_chroot_script refuses to build without it.
+export STITCHLABOS_CONFIG_REF="${STITCHLABOS_CONFIG_REF:-}"

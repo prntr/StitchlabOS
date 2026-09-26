@@ -18,10 +18,21 @@ unpack /filesystem/etc /etc root
 # Moonraker components under usr/local/lib/stitchlabos; symlinked below.
 unpack /filesystem/usr /usr root
 
-# Clone stitchlabos-config repo (wifi_manager, scripts, macros)
-# Keep .git intact so Moonraker update_manager can do git pull on deployed machines
-echo "Cloning stitchlabos-config..."
-sudo -u pi git clone --depth=1 https://github.com/prntr/stitchlabos-config.git /home/pi/stitchlabos-config
+# Clone stitchlabos-config (wifi_manager, intake glue, scripts, macros) at the
+# commit the meta-repo pins as a submodule, so a tag always rebuilds the same
+# image. Keep .git and put `main` on that commit: update_manager
+# ([update_manager stitchlabos], primary_branch main) pulls from there, and a
+# detached HEAD or a diverged branch would block every update.
+: "${STITCHLABOS_CONFIG_REF:?not set - CI passes the stitchlabos-config submodule commit (build-image.yml)}"
+echo "Cloning stitchlabos-config at ${STITCHLABOS_CONFIG_REF}..."
+sudo -u pi git clone --branch main https://github.com/prntr/stitchlabos-config.git /home/pi/stitchlabos-config
+if ! sudo -u pi git -C /home/pi/stitchlabos-config merge-base --is-ancestor \
+        "${STITCHLABOS_CONFIG_REF}" origin/main; then
+    echo "ERROR: stitchlabos-config ${STITCHLABOS_CONFIG_REF} is not on origin/main."
+    echo "       Push the submodule commit to main before building."
+    exit 1
+fi
+sudo -u pi git -C /home/pi/stitchlabos-config reset --hard "${STITCHLABOS_CONFIG_REF}"
 
 # Create symlinks from stitchlabos-config to expected locations
 ln -sf /home/pi/stitchlabos-config/moonraker/components/wifi_manager.py \
