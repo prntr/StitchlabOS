@@ -85,14 +85,22 @@ def placement_adjusted_bounds(bounds: Bounds,
     return adjusted
 
 
+# Rotation and float formatting leave sub-micron noise on bounds that sit
+# exactly on the hoop edge; do not block a job over that.
+_BOUNDS_EPSILON_MM = 1e-6
+
+
 def check_hoop_bounds(result: AnalysisResult,
                       hoop: Optional[HoopSpec],
                       bounds: Optional[Bounds] = None) -> None:
-    """Compare design bounds against the usable hoop area.
+    """Compare placed design bounds against the usable hoop area.
 
-    Placement is assumed already applied at this point — Phase 1 CLI runs
-    without placement transforms, so this is a check on the raw geometry.
-    Phase 4 Mainsail/Moonraker passes placement-adjusted bounds.
+    ``bounds`` are the placement-adjusted bounds from
+    ``placement_adjusted_bounds``. The usable area spans
+    ``[margin, usable - margin]`` on both axes — the same frame the renderer,
+    GCode Studio and the machine (position_min 0) use. Size alone is not
+    enough: an offset moves a design out of the hoop without changing its
+    width or height.
     """
     bounds = bounds or result.bounds
     if hoop is None or not bounds.is_valid:
@@ -115,6 +123,31 @@ def check_hoop_bounds(result: AnalysisResult,
             "error", "DESIGN_TOO_TALL",
             f"Design height {bounds.height:.1f} mm exceeds usable hoop "
             f"height {height_limit:.1f} mm (hoop_id={hoop.hoop_id})",
+        ))
+
+    # A design that fits by size can still sit outside the hoop. Report the
+    # position only where the size fits, so one cause gives one error.
+    lo_x, hi_x = margin, hoop.usable_width_mm - margin
+    lo_y, hi_y = margin, hoop.usable_height_mm - margin
+    outside = []
+    if bounds.width <= width_limit:
+        if bounds.min_x < lo_x - _BOUNDS_EPSILON_MM:
+            outside.append(f"{lo_x - bounds.min_x:.1f} mm past the left edge")
+        if bounds.max_x > hi_x + _BOUNDS_EPSILON_MM:
+            outside.append(f"{bounds.max_x - hi_x:.1f} mm past the right edge")
+    if bounds.height <= height_limit:
+        if bounds.min_y < lo_y - _BOUNDS_EPSILON_MM:
+            outside.append(f"{lo_y - bounds.min_y:.1f} mm past the bottom edge")
+        if bounds.max_y > hi_y + _BOUNDS_EPSILON_MM:
+            outside.append(f"{bounds.max_y - hi_y:.1f} mm past the top edge")
+    if outside:
+        result.diagnostics.append(Diagnostic(
+            "error", "DESIGN_OUTSIDE_HOOP",
+            f"Design X {bounds.min_x:.1f}..{bounds.max_x:.1f} mm, "
+            f"Y {bounds.min_y:.1f}..{bounds.max_y:.1f} mm lies outside the "
+            f"usable hoop area X {lo_x:.1f}..{hi_x:.1f} mm, "
+            f"Y {lo_y:.1f}..{hi_y:.1f} mm: {', '.join(outside)} "
+            f"(hoop_id={hoop.hoop_id})",
         ))
 
 

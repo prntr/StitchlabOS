@@ -94,6 +94,21 @@ def test_render_respects_size(tmp_path):
         assert img.size == (128, 128)
 
 
+def test_analyze_blocks_design_offset_out_of_hoop(capsys):
+    # The start flow sends the GCode Studio placement; an offset that moves
+    # a fitting design past the frame edge must block the job.
+    rc = cli.main([
+        "analyze", fx("valid_minimal.gcode"),
+        "--hoop-width-mm", "80",
+        "--hoop-height-mm", "130",
+        "--placement-json", json.dumps({"offset_x": 70, "offset_y": 0}),
+    ])
+    assert rc == 2
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["status"] == "blocked"
+    assert [e["code"] for e in doc["errors"]] == ["DESIGN_OUTSIDE_HOOP"]
+
+
 def test_analyze_with_thumbnail_out_writes_both(tmp_path, capsys):
     thumb = tmp_path / "thumb.png"
     rc = cli.main([
