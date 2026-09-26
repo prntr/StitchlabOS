@@ -84,9 +84,11 @@ image build. Build details: [`docs/08-image-building.md`](docs/08-image-building
 
 **Every published URL must resolve.** Beta1's `os_list.json` referenced an asset
 name that was never uploaded. `os_list.json` is now generated per release from
-`os_list.template.json`, and the workflow's last step fails the build if any
-published URL returns something other than 200. Do not reintroduce a checked-in
-`os_list.json`.
+`os_list.template.json`. The workflow creates each release as a draft, checks
+the uploaded assets against `os_list.json` through the API, and only then
+publishes; if a public URL still fails afterwards it turns the release back into
+a draft so `/releases/latest/` falls back. Do not reintroduce a checked-in
+`os_list.json`, and do not publish the release directly.
 
 **Every tag is a regular release, never a prerelease.** GitHub excludes
 prereleases from `/releases/latest/`, and README, docs and `os_list.json` users

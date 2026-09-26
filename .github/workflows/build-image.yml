@@ -301,7 +301,8 @@ jobs:
             release-assets/**
           retention-days: 7
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (draft)
+        id: release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
@@ -364,36 +365,119 @@ jobs:
             release-assets/os_list.json
             release-assets/COMMISSIONING.md
             release-assets/firmware/*
-          draft: false
+          # Created as a draft and published only after the next step has
+          # checked the uploaded assets: a broken public release becomes
+          # /releases/latest/ at once, which README, docs and os_list.json
+          # users all follow.
+          draft: true
           # Deliberately never a prerelease: GitHub excludes prereleases from
           # /releases/latest/, which would leave every "latest" URL in README
           # and docs pointing at nothing while the project is in beta.
           prerelease: false
           generate_release_notes: false
 
-      - name: Verify published URLs
+      - name: Verify release assets before publishing
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          TAG: ${{ steps.version.outputs.version }}
+          LIST: ${{ github.workspace }}/release-assets/os_list.json
         run: |
           set -euo pipefail
           # Beta1 shipped an os_list.json pointing at an asset name that was never
-          # published — a silent 404 for every user. Prove the links work before
-          # anyone downloads them.
-          LIST="$GITHUB_WORKSPACE/release-assets/os_list.json"
+          # published. Check the draft through the API: its download URLs are not
+          # public yet, so curl cannot see them.
+          ASSETS="$(gh api "repos/$REPO/releases/$RELEASE_ID" \
+            --jq '.assets[] | "\(.name)\t\(.size)\t\(.state)\t\(.id)"')"
           FAILED=0
+          asset_field() { printf '%s\n' "$ASSETS" | awk -F'\t' -v n="$1" -v f="$2" '$1 == n { print $f }'; }
 
-          # Release assets can take a moment to become downloadable.
-          sleep 20
+          for name in "$IMAGE_XZ" "$IMAGE_XZ.sha256" os_list.json COMMISSIONING.md \
+                      katapult.uf2 klipper.bin klipper.uf2 klipper-standalone.uf2 SHA256SUMS.txt; do
+            size="$(asset_field "$name" 2)"; state="$(asset_field "$name" 3)"
+            if [ -n "$size" ] && [ "$size" -gt 0 ] && [ "$state" = "uploaded" ]; then
+              echo "ok   $name ($size bytes)"
+            else
+              echo "::error::release asset $name missing or incomplete (size=${size:-none} state=${state:-none})"
+              FAILED=1
+            fi
+          done
 
-          # Both the tag-pinned URLs (release text) and the /latest/ URL (README,
-          # docs) must work. /latest/ only resolves because prerelease is false.
+          # os_list.json must point at the image of *this* release, with its size.
+          url="$(jq -r '.os_list[0].url' "$LIST")"
+          expected="https://github.com/$REPO/releases/download/$TAG/$IMAGE_XZ"
+          if [ "$url" != "$expected" ]; then
+            echo "::error::os_list.json url is $url, expected $expected"
+            FAILED=1
+          fi
+          listed_size="$(jq -r '.os_list[0].image_download_size' "$LIST")"
+          if [ "$listed_size" != "$(asset_field "$IMAGE_XZ" 2)" ]; then
+            echo "::error::os_list.json image_download_size $listed_size does not match the uploaded image"
+            FAILED=1
+          fi
+
+          # The uploaded os_list.json is the file checked above, byte for byte.
+          list_id="$(asset_field os_list.json 4)"
+          if [ -n "$list_id" ]; then
+            gh api -H 'Accept: application/octet-stream' \
+              "repos/$REPO/releases/assets/$list_id" > "$RUNNER_TEMP/os_list.uploaded.json"
+            if ! cmp -s "$LIST" "$RUNNER_TEMP/os_list.uploaded.json"; then
+              echo "::error::uploaded os_list.json differs from the generated one"
+              FAILED=1
+            fi
+          fi
+
+          # The icon lives in the repo at the tag, which is already public.
+          icon="$(jq -r '.os_list[0].icon' "$LIST")"
+          code=$(curl -sIL -o /dev/null -w '%{http_code}' "$icon" || echo 000)
+          if [ "$code" != "200" ]; then
+            echo "::error::$code $icon"
+            FAILED=1
+          fi
+
+          if [ "$FAILED" != "0" ]; then
+            echo "::error::Release $TAG left as a draft. Fix the cause, delete the draft and re-run."
+            exit 1
+          fi
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F draft=false --jq '"published \(.html_url)"'
+
+      - name: Verify published URLs
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          TAG: ${{ steps.version.outputs.version }}
+          LIST: ${{ github.workspace }}/release-assets/os_list.json
+        run: |
+          set -euo pipefail
+          # The assets were checked on the draft; this proves the public URLs,
+          # including /latest/, which only resolves because prerelease is false.
+          FAILED=0
           for url in \
             "$(jq -r '.os_list[0].url' "$LIST")" \
-            "$(jq -r '.os_list[0].icon' "$LIST")" \
-            "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/os_list.json" \
-            "https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/COMMISSIONING.md" \
-            "https://github.com/${{ github.repository }}/releases/latest/download/os_list.json"
+            "https://github.com/$REPO/releases/download/$TAG/os_list.json" \
+            "https://github.com/$REPO/releases/download/$TAG/COMMISSIONING.md" \
+            "https://github.com/$REPO/releases/latest/download/os_list.json"
           do
-            code=$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || echo 000)
+            # Freshly published assets can take a moment to become downloadable.
+            code=000
+            for attempt in 1 2 3 4 5 6; do
+              code=$(curl -sIL -o /dev/null -w '%{http_code}' "$url" || echo 000)
+              [ "$code" = "200" ] && break
+              sleep 10
+            done
             if [ "$code" = "200" ]; then
               echo "ok   $code  $url"
             else
@@ -402,4 +486,8 @@ jobs:
             fi
           done
 
-          [ "$FAILED" = "0" ] || exit 1
+          if [ "$FAILED" != "0" ]; then
+            # Take the release back so /latest/ falls back to the previous one.
+            gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F draft=true --jq '"reverted to draft: \(.html_url)"'
+            exit 1
+          fi

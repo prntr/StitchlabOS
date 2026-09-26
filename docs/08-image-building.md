@@ -113,7 +113,7 @@ GitHub Actions builds on tags (`v*`) and manual dispatch. **Never** on every pus
 7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... STITCHLABOS_CONFIG_REF=<submodule commit> bash -x .../build`. The `stitchlabos` module clones `stitchlabos-config` in the chroot and puts `main` on exactly that commit, so a tag rebuilds the same image. The commit must already be on `origin/main` — the build fails otherwise, because a detached or diverged checkout would block Moonraker's update_manager on the Pi.
 8. Compress output with `xz -9`, generate sha256
 9. Upload as artifact (7-day retention)
-10. Create GitHub Release on tags
+10. On tags: create the GitHub Release as a **draft**, check it through the API (every asset uploaded and non-empty, `os_list.json` names this release's image with its size, the uploaded `os_list.json` is the generated one, the icon resolves), publish it, then check the public URLs including `/releases/latest/`. A failing draft check leaves the release unpublished; a failing public check turns it back into a draft.
 
 ### Key CustomPiOS API Notes
 
