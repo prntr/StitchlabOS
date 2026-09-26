@@ -320,3 +320,54 @@ def test_prepare_uses_cache_on_repeat(tmp_path):
         assert fa.cli_calls == calls_after_first
 
     _run(go())
+
+
+def test_status_hashes_off_the_event_loop_and_caches(tmp_path, monkeypatch):
+    # status() runs inside Moonraker's event loop for every listed file.
+    # Hashing must happen on another thread, and only once per unchanged file.
+    from stitchlab_intake import component
+
+    fa = FakeAdapter()
+    core = _make_core(tmp_path, fa)
+    real_hash = component._sha256_of_file
+    hashed_on: list[int] = []
+
+    def recording_hash(path):
+        import threading
+        hashed_on.append(threading.get_ident())
+        return real_hash(path)
+
+    monkeypatch.setattr(component, "_sha256_of_file", recording_hash)
+
+    async def go():
+        import threading
+        loop_thread = threading.get_ident()
+        await core.status("design.gcode")
+        await core.status("design.gcode")
+        await core.metadata("design.gcode")
+        assert len(hashed_on) == 1, hashed_on
+        assert hashed_on[0] != loop_thread
+
+        # An upload over the file changes size/mtime: hash again.
+        gcode = core.cfg.gcodes_root / "design.gcode"
+        gcode.write_text(gcode.read_text() + "G1 X1 Y1\n")
+        await core.status("design.gcode")
+        assert len(hashed_on) == 2
+
+    _run(go())
+
+
+def test_changed_file_is_not_served_a_stale_analysis(tmp_path):
+    # The digest cache must not let a rewritten file keep the old report.
+    fa = FakeAdapter()
+    core = _make_core(tmp_path, fa)
+
+    async def go():
+        first = await core.prepare("design.gcode")
+        gcode = core.cfg.gcodes_root / "design.gcode"
+        gcode.write_text(gcode.read_text().replace("G1 X20 Y20", "G1 X25 Y20"))
+        second = await core.prepare("design.gcode")
+        assert second["analysis_key"] != first["analysis_key"]
+        assert second["bounds"]["width"] == 25.0
+
+    _run(go())

@@ -39,6 +39,10 @@ log = logging.getLogger(__name__)
 META_SUBDIR = ".stitchlab_meta"
 THUMB_SUBDIR = ".stitchlab_thumbs"
 
+# Upper bound for remembered file digests; far above a realistic gcodes
+# folder, only there so a pathological one cannot grow memory unbounded.
+_SHA_CACHE_MAX = 4096
+
 
 @dataclass
 class CliResult:
@@ -144,6 +148,8 @@ class IntakeCore:
         self._worker: Optional[asyncio.Task] = None
         # Index by filename so duplicate analyze requests collapse.
         self._index: dict[str, Task] = {}
+        # path -> ((inode, size, mtime_ns), sha256); see _file_sha256.
+        self._sha_cache: dict[Path, tuple[tuple[int, int, int], str]] = {}
 
     # --- lifecycle -------------------------------------------------------
 
@@ -205,7 +211,7 @@ class IntakeCore:
 
     async def status(self, filename: str) -> dict:
         task = self._index.get(filename)
-        cached = self._load_cached_meta(filename)
+        cached = await self._load_cached_meta(filename)
         if cached:
             macros = await self._macro_diagnostic(cached.get("referenced_unknown_macros") or [])
             return {
@@ -222,7 +228,7 @@ class IntakeCore:
 
     async def metadata(self, filename: str) -> dict:
         task = self._index.get(filename)
-        cached = self._load_cached_meta(filename)
+        cached = await self._load_cached_meta(filename)
         if cached:
             report = dict(cached)
             report["filename"] = filename
@@ -244,7 +250,7 @@ class IntakeCore:
         """
         placement = _normalise_placement(placement, hoop_id)
         hoop_id = (placement or {}).get("hoop_id") or hoop_id or self.cfg.default_hoop
-        cached = self._load_cached_meta(filename)
+        cached = await self._load_cached_meta(filename)
         if cached is not None and placement is not None:
             cached_raw_placement = cached.get("placement") or {}
             cached_placement = _normalise_placement(
@@ -304,7 +310,7 @@ class IntakeCore:
         if not gcode_path.is_file():
             raise FileNotFoundError(filename)
 
-        sha = _sha256_of_file(gcode_path)
+        sha = await self._file_sha256(gcode_path)
         analysis_key = f"{sha}:{CHECKER_VERSION}"
         analysis_digest = _digest(analysis_key)
         basename = gcode_path.name
@@ -417,12 +423,34 @@ class IntakeCore:
                 except OSError:
                     pass
 
-    def _load_cached_meta(self, filename: str) -> Optional[dict]:
+    async def _file_sha256(self, path: Path) -> str:
+        """SHA-256 of a G-code file, hashed off the event loop and cached.
+
+        This code runs inside Moonraker's event loop, and Mainsail asks
+        status() for every listed file: hashing multi-MB files from an SD
+        card there stalls websocket traffic and Klippy updates. The digest
+        is reused while inode, size and mtime are unchanged; an upload
+        replaces or rewrites the file, which changes them. The key is taken
+        before hashing, so a file changed mid-hash is hashed again next time.
+        """
+        st = path.stat()
+        key = (st.st_ino, st.st_size, st.st_mtime_ns)
+        hit = self._sha_cache.get(path)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        sha = await asyncio.get_running_loop().run_in_executor(
+            None, _sha256_of_file, path)
+        if len(self._sha_cache) >= _SHA_CACHE_MAX:
+            self._sha_cache.clear()
+        self._sha_cache[path] = (key, sha)
+        return sha
+
+    async def _load_cached_meta(self, filename: str) -> Optional[dict]:
         gcode_path = self._resolve(filename)
         if not gcode_path.is_file():
             return None
         try:
-            sha = _sha256_of_file(gcode_path)
+            sha = await self._file_sha256(gcode_path)
         except OSError:
             return None
         analysis_key = f"{sha}:{CHECKER_VERSION}"
