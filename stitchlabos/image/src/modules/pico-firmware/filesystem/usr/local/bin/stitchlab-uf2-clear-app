@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""stitchlab-uf2-clear-app — append an "erase the application" block to a UF2.
+
+Katapult starts the application whenever the first word at the application
+address is neither 0 nor 0xffffffff. Writing katapult.uf2 over BOOTSEL only
+rewrites the bootloader region, so on a Pico that ran older firmware the old
+application is still there: Katapult starts it and never listens on the UART.
+
+This tool copies a UF2 and appends one block that writes 0xff to the first
+page at the application address. The RP2040 bootrom erases the whole 4 KiB
+sector before programming it, so Katapult finds no application and stays in
+the bootloader — exactly as on a factory-fresh board.
+
+Usage: stitchlab-uf2-clear-app IN.uf2 OUT.uf2 [--address 0x10004000]
+"""
+
+import argparse
+import struct
+import sys
+
+BLOCK_SIZE = 512
+MAGIC_START0 = 0x0A324655
+MAGIC_START1 = 0x9E5D5157
+MAGIC_END = 0x0AB16F30
+HEADER = struct.Struct("<8I")  # magic0, magic1, flags, addr, size, blockNo, numBlocks, family
+PAYLOAD = 256
+DATA_AREA = 476
+SECTOR = 4096
+
+
+def read_blocks(data: bytes) -> list:
+    if not data or len(data) % BLOCK_SIZE:
+        raise ValueError(f"not a UF2 file: size {len(data)} is not a multiple of {BLOCK_SIZE}")
+    blocks = []
+    for off in range(0, len(data), BLOCK_SIZE):
+        block = data[off:off + BLOCK_SIZE]
+        fields = HEADER.unpack_from(block, 0)
+        (magic_end,) = struct.unpack_from("<I", block, BLOCK_SIZE - 4)
+        if fields[0] != MAGIC_START0 or fields[1] != MAGIC_START1 or magic_end != MAGIC_END:
+            raise ValueError(f"bad UF2 magic in block {off // BLOCK_SIZE}")
+        blocks.append((list(fields), block[HEADER.size:BLOCK_SIZE - 4]))
+    return blocks
+
+
+def clear_app(data: bytes, address: int) -> bytes:
+    blocks = read_blocks(data)
+    if address % SECTOR:
+        raise ValueError(f"address 0x{address:08x} is not sector aligned")
+    for fields, _ in blocks:
+        start, size = fields[3], fields[4]
+        if start < address + SECTOR and start + size > address:
+            raise ValueError(f"input already writes 0x{start:08x}, inside the sector being cleared")
+    flags, family = blocks[0][0][2], blocks[0][0][7]
+    erase = bytes([0xFF]) * PAYLOAD + bytes(DATA_AREA - PAYLOAD)
+    blocks.append(([MAGIC_START0, MAGIC_START1, flags, address, PAYLOAD, 0, 0, family], erase))
+
+    out = bytearray()
+    for number, (fields, body) in enumerate(blocks):
+        fields[5], fields[6] = number, len(blocks)
+        out += HEADER.pack(*fields) + body + struct.pack("<I", MAGIC_END)
+    return bytes(out)
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("input")
+    parser.add_argument("output")
+    parser.add_argument("--address", type=lambda s: int(s, 0), default=0x10004000)
+    args = parser.parse_args(argv)
+    try:
+        with open(args.input, "rb") as f:
+            result = clear_app(f.read(), args.address)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    with open(args.output, "wb") as f:
+        f.write(result)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

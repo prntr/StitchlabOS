@@ -54,7 +54,9 @@ The script walks through it:
 1. It stops `klipper`, which otherwise holds `/dev/serial0`.
 2. It asks you to hold **BOOTSEL** on the Pico and plug the Pico into a USB port
    of the Pi.
-3. It writes `katapult.uf2` to the `RPI-RP2` drive that appears.
+3. It writes `katapult.uf2` to the `RPI-RP2` drive that appears, together with
+   an erased application sector. A Pico that ran other firmware before then
+   behaves like a new one: Katapult finds no application and waits on the UART.
 4. After the Pico reboots, it flashes `klipper.bin` over `/dev/serial0` (up to
    three attempts — the RP2040 occasionally misses the first serial resync).
 5. It restarts `klipper` and checks `klippy.log` for the MCU.
@@ -127,7 +129,8 @@ GND ─────────────── GND
 If `--uart` no longer works but the board is still reachable over BOOTSEL:
 
 ```bash
-stitchlab-flash-pico --bootsel     # rewrite Katapult, then continue normally
+stitchlab-flash-pico --bootsel     # rewrite Katapult and clear the application
+stitchlab-flash-pico --uart        # then flash Klipper again
 ```
 
 If Katapult itself is the problem, the bootloader-free build helps. Afterwards

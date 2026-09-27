@@ -64,8 +64,9 @@ you actually edited.
 | `make setup` | `npm ci` in `mainsail/` |
 | `make dev` | serve the Mainsail UI locally |
 | `make sim` | start the virtual Klipper printer (Docker) |
-| `make test` | `test-intake`, then Mainsail's Cypress E2E suite — slow, needs a browser |
+| `make test` | `test-intake` and `test-pico`, then Mainsail's Cypress E2E suite — slow, needs a browser |
 | `make test-intake` | pytest for the G-code intake module, via `uv` on Python 3.13 — fast, no hardware |
+| `make test-pico` | pytest for the Pico flash tools (`stitchlab-uf2-clear-app`) — fast, no hardware |
 | `make lint` | Mainsail's linter + dead links in `docs/` |
 | `make check` | `lint` + `test` — the gate before any commit |
 | `make status` | state of all nested repos |

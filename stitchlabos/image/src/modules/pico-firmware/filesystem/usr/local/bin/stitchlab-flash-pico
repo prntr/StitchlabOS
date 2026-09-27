@@ -5,7 +5,8 @@
 #
 #   1. BOOTSEL: a blank RP2040 only accepts UF2 over USB mass storage. Plug the
 #      Pico into a Pi USB port while holding BOOTSEL; this script copies
-#      Katapult onto it. Needed exactly once per board.
+#      Katapult onto it and clears any old application, so a used board
+#      behaves like a fresh one. Needed exactly once per board.
 #   2. UART: once Katapult is on the Pico, Klipper is flashed over
 #      /dev/serial0 — the same wires Klipper talks on. No cable, no jumper.
 #
@@ -76,7 +77,27 @@ restore_klipper() {
         sudo systemctl start klipper || true
     fi
 }
-trap restore_klipper EXIT
+
+# --- Katapult for any board, fresh or used ---------------------------------
+# Katapult starts whatever application it finds at 0x10004000. On a Pico that
+# ran older firmware that is the old Klipper, which then ignores the UART
+# bootloader request. Write Katapult together with an erased application
+# sector, so a used board comes up exactly like a factory-fresh one.
+KATAPULT_CLEAN_UF2=""
+prepare_katapult() {
+    require_file "$KATAPULT_UF2"
+    KATAPULT_CLEAN_UF2="$(mktemp --suffix=.uf2)"
+    /usr/local/bin/stitchlab-uf2-clear-app "$KATAPULT_UF2" "$KATAPULT_CLEAN_UF2" \
+        || fail "Could not prepare Katapult from ${KATAPULT_UF2}"
+}
+
+cleanup() {
+    restore_klipper
+    if [ -n "$KATAPULT_CLEAN_UF2" ]; then
+        rm -f "$KATAPULT_CLEAN_UF2"
+    fi
+}
+trap cleanup EXIT
 
 # --- BOOTSEL path -----------------------------------------------------------
 find_bootsel_device() {
@@ -218,7 +239,9 @@ info "Serial:    ${SERIAL} @ ${BAUD}"
 case "$MODE" in
     bootsel)
         release_serial
-        flash_via_bootsel "$KATAPULT_UF2" "Katapult"
+        prepare_katapult
+        flash_via_bootsel "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
+        info "The Pico now waits in Katapult. Flash Klipper with: stitchlab-flash-pico --uart"
         ;;
     uart)
         release_serial
@@ -234,7 +257,8 @@ case "$MODE" in
         release_serial
         if dev="$(wait_for_bootsel)"; then
             info "Found ${BOOTSEL_LABEL} at ${dev} — writing Katapult."
-            flash_via_bootsel "$KATAPULT_UF2" "Katapult"
+            prepare_katapult
+            flash_via_bootsel "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
         else
             say "No Pico appeared in BOOTSEL mode within ${BOOTSEL_WAIT}s"
             info "Continuing over the UART, assuming Katapult is already on the Pico."
