@@ -96,9 +96,26 @@ jobs:
 
       - name: Build Mainsail
         run: |
+          set -euo pipefail
           cd mainsail
+          # Moonraker's update_manager compares release_info.json with the
+          # releases of [update_manager mainsail] repo: prntr/mainsail. It must
+          # name the fork and the fork's release tag of the pinned commit;
+          # otherwise Moonraker falls back to upstream mainsail-crew and offers
+          # to replace the StitchLAB UI with upstream Mainsail.
+          PIN="$(git rev-parse HEAD)"
+          TAG="$(git ls-remote --tags https://github.com/prntr/mainsail.git \
+            | awk -v pin="$PIN" '$1 == pin { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2 }' \
+            | grep -E '^v[0-9.]+-stitchlab\.[0-9]+$' | sort -V | tail -1 || true)"
+          if [ -z "$TAG" ]; then
+            echo "::error::mainsail pin $PIN has no vX.Y.Z-stitchlab.N release in prntr/mainsail; pin a released commit"
+            exit 1
+          fi
+          echo "Mainsail release: $TAG ($PIN)"
           npm ci
-          npm run build
+          MAINSAIL_RELEASE_OWNER=prntr MAINSAIL_RELEASE_VERSION="$TAG" npm run build
+          grep -q "\"project_owner\":\"prntr\"" dist/release_info.json
+          grep -q "\"version\":\"$TAG\"" dist/release_info.json
           mkdir -p ../stitchlabos/image/src/modules/mainsail/filesystem/home/pi/mainsail
           cp -r dist/* ../stitchlabos/image/src/modules/mainsail/filesystem/home/pi/mainsail/
 
