@@ -3,7 +3,10 @@
 
 # Base image configuration
 export DIST_NAME="StitchLabOS"
-export DIST_VERSION="0.1.0"
+# The release, without the tag's "v" (0.1.0-beta.5). CustomPiOS writes it to
+# /etc/stitchlabos_version. CI passes it (build-image.yml); a hard-coded value
+# here once made every beta report "0.1.0".
+export DIST_VERSION="${STITCHLABOS_VERSION:?not set - CI passes the release version (build-image.yml)}"
 
 # Use Raspberry Pi OS Lite 64-bit (Trixie)
 # Lite is smaller (~500MB vs 2GB) and better for headless embedded devices

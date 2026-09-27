@@ -178,7 +178,7 @@ MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd
 
 ```bash
 export DIST_NAME="StitchLabOS"
-export DIST_VERSION="0.1.0"
+export DIST_VERSION="${STITCHLABOS_VERSION:?…}"   # from the tag, e.g. 0.1.0-beta.5; written to /etc/stitchlabos_version
 export BASE_BOARD="raspberrypiarm64"
 export BASE_IMAGE_SECTION="latest"
 export MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd,stitchlabos)"

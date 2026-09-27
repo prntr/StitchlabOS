@@ -188,23 +188,6 @@ jobs:
           xz -1 -T0 "$IMG"
           ls -lh stitchlabos/image/src/image-raspberrypiarm64/
 
-      - name: Build image
-        run: |
-          set -euo pipefail
-          # The image clones stitchlabos-config inside the chroot; pin it to the
-          # submodule commit this checkout records, not whatever main is today.
-          STITCHLABOS_CONFIG_REF="$(git -C "$GITHUB_WORKSPACE/stitchlabos-config" rev-parse HEAD)"
-          echo "STITCHLABOS_CONFIG_SHA=$(git -C "$GITHUB_WORKSPACE/stitchlabos-config" rev-parse --short HEAD)" >> "$GITHUB_ENV"
-          sudo modprobe loop
-          sudo \
-            DIST_PATH="$GITHUB_WORKSPACE/stitchlabos/image/src" \
-            CUSTOM_PI_OS_PATH="$GITHUB_WORKSPACE/CustomPiOS/src" \
-            STITCHLABOS_CONFIG_REF="$STITCHLABOS_CONFIG_REF" \
-            KLIPPER_REF="$KLIPPER_REF" \
-            KATAPULT_REF="$KATAPULT_REF" \
-            bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
-        timeout-minutes: 90
-
       - name: Get version
         id: version
         run: |
@@ -214,6 +197,29 @@ jobs:
             echo "version=$(date +%Y%m%d)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           fi
           echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          # The image clones stitchlabos-config inside the chroot; pin it to the
+          # submodule commit this checkout records, not whatever main is today.
+          STITCHLABOS_CONFIG_REF="$(git -C "$GITHUB_WORKSPACE/stitchlabos-config" rev-parse HEAD)"
+          echo "STITCHLABOS_CONFIG_SHA=$(git -C "$GITHUB_WORKSPACE/stitchlabos-config" rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          # CustomPiOS writes DIST_VERSION to /etc/stitchlabos_version, the only
+          # place a machine can tell which release it runs: 0.1.0-beta.5 for tag
+          # v0.1.0-beta.5, YYYYMMDD-sha for a manual run.
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${VERSION#v}"
+          sudo modprobe loop
+          sudo \
+            DIST_PATH="$GITHUB_WORKSPACE/stitchlabos/image/src" \
+            CUSTOM_PI_OS_PATH="$GITHUB_WORKSPACE/CustomPiOS/src" \
+            STITCHLABOS_CONFIG_REF="$STITCHLABOS_CONFIG_REF" \
+            KLIPPER_REF="$KLIPPER_REF" \
+            KATAPULT_REF="$KATAPULT_REF" \
+            STITCHLABOS_VERSION="$VERSION" \
+            bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
+        timeout-minutes: 90
 
       - name: Compress and checksum
         run: |
