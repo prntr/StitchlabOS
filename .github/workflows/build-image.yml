@@ -363,10 +363,11 @@ jobs:
             stitchlab-flash-pico
             ```
 
-            Hold **BOOTSEL** and plug the Pico into a USB port of the Pi when prompted. The
-            script writes Katapult over USB and Klipper over `/dev/serial0`, then verifies
-            that the MCU came up. Every later firmware update runs over the UART alone —
-            no cable, no jumper.
+            When prompted, switch on the machine's 24 V supply, put a jumper on the Pico's
+            **BOOT** pins, connect it to a USB port of the Pi and press **RESET**; the script
+            tells you when to remove the jumper. It writes Katapult over USB and Klipper
+            over `/dev/serial0`, then verifies that the MCU came up. Every later firmware
+            update runs over the UART alone — no cable, no jumper.
 
             `COMMISSIONING.md` below is the full walkthrough for **this** image, including
             what to do when something sticks.

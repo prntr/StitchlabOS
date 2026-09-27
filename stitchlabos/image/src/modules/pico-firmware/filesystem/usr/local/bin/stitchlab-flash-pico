@@ -3,10 +3,11 @@
 #
 # Two paths, both offline (a freshly imaged Pi in AP mode has no internet):
 #
-#   1. BOOTSEL: a blank RP2040 only accepts UF2 over USB mass storage. Plug the
-#      Pico into a Pi USB port while holding BOOTSEL; this script copies
-#      Katapult onto it and clears any old application, so a used board
-#      behaves like a fresh one. Needed exactly once per board.
+#   1. BOOTSEL: a blank RP2040 only accepts UF2 over USB mass storage. The SKR
+#      Pico V1.0 has no BOOTSEL button: put a jumper on its BOOT pins, connect
+#      it to a Pi USB port and press RESET. This script copies Katapult onto it
+#      and clears any old application, so a used board behaves like a fresh
+#      one. Needed exactly once per board.
 #   2. UART: once Katapult is on the Pico, Klipper is flashed over
 #      /dev/serial0 — the same wires Klipper talks on. No cable, no jumper.
 #
@@ -128,11 +129,12 @@ wait_for_bootsel() {
     # Callers capture this function's stdout as the device path, so every
     # message here has to go to stderr or it ends up inside "$dev".
     {
-        say "Plug in the Pico in BOOTSEL mode"
-        info "1. Unplug the USB cable from the Pico, if connected"
-        info "2. Hold down the BOOTSEL button on the Pico"
-        info "3. Plug the Pico into a USB port of the Pi"
-        info "4. Release BOOTSEL"
+        say "Put the SKR Pico into flash mode (BOOTSEL)"
+        info "1. Switch on the machine's 24 V supply"
+        info "2. Put a jumper on the Pico's BOOT pins"
+        info "3. Connect the Pico to a USB port of the Pi (data cable, plug fully in)"
+        info "4. Press RESET on the Pico"
+        info "I will ask you to remove the jumper before anything is written."
         info ""
         info "Waiting up to ${BOOTSEL_WAIT}s for a drive labelled ${BOOTSEL_LABEL} ..."
     } >&2
@@ -149,14 +151,26 @@ wait_for_bootsel() {
     return 1
 }
 
+# The RP2040 checks BOOT at every reset. A jumper still on when the UF2 lands
+# makes the board restart into flash mode instead of the new firmware.
+confirm_boot_jumper_removed() {
+    if [ -t 0 ]; then
+        printf '\n  \033[1mRemove the BOOT jumper now\033[0m (the Pico stays in flash mode), then press Enter: '
+        read -r _
+    else
+        info "Not interactive: make sure the BOOT jumper is off, or the Pico restarts into flash mode."
+    fi
+}
+
 flash_via_bootsel() {
     local uf2="$1" label="$2" dev
     require_file "$uf2"
 
     if ! dev="$(wait_for_bootsel)"; then
-        fail "No ${BOOTSEL_LABEL} drive found. Is the USB cable seated, and was BOOTSEL held while plugging in?"
+        fail "No ${BOOTSEL_LABEL} drive found. Is the 24 V supply on, the BOOT jumper fitted, the USB cable a data cable and fully seated, and was RESET pressed?"
     fi
     info "Found: ${dev}"
+    confirm_boot_jumper_removed
 
     sudo mkdir -p "$MOUNTPOINT"
     sudo mount "$dev" "$MOUNTPOINT"
@@ -173,7 +187,7 @@ flash_via_bootsel() {
     local waited=0
     while [ -n "$(find_bootsel_device)" ]; do
         if [ "$waited" -ge 15 ]; then
-            fail "${BOOTSEL_LABEL} is still mounted after writing ${uf2}. The write did not complete — check the cable and retry."
+            fail "${BOOTSEL_LABEL} is still there after writing ${uf2}. Either the BOOT jumper is still on and the Pico restarted into flash mode (the firmware is written: remove the jumper and press RESET; after Katapult, continue with stitchlab-flash-pico --uart), or the write did not complete (check the cable and run this again)."
         fi
         sleep 1
         waited=$((waited + 1))
@@ -256,7 +270,7 @@ case "$MODE" in
     auto)
         release_serial
         if dev="$(wait_for_bootsel)"; then
-            info "Found ${BOOTSEL_LABEL} at ${dev} — writing Katapult."
+            info "Found ${BOOTSEL_LABEL} at ${dev}."
             prepare_katapult
             flash_via_bootsel "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
         else

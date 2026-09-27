@@ -62,10 +62,11 @@ ssh pi@stitchlab.local
 stitchlab-flash-pico
 ```
 
-Hold **BOOTSEL** on the Pico and plug it into a USB port of the Pi when
-prompted. The script writes Katapult over USB, flashes Klipper over the UART and
-verifies the MCU came up. The USB cable is needed exactly once — every later
-firmware update runs over the UART alone.
+When prompted, switch on the machine's 24 V supply, put a jumper on the Pico's
+**BOOT** pins, connect it to a USB port of the Pi and press **RESET**; the
+script tells you when to remove the jumper. It writes Katapult over USB,
+flashes Klipper over the UART and verifies the MCU came up. The USB cable is
+needed exactly once — every later firmware update runs over the UART alone.
 
 The full walkthrough, including what to do when something sticks:
 [docs/11-commissioning.md](docs/11-commissioning.md). The same guide is attached

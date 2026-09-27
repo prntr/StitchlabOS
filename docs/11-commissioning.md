@@ -52,8 +52,15 @@ stitchlab-flash-pico
 The script walks through it:
 
 1. It stops `klipper`, which otherwise holds `/dev/serial0`.
-2. It asks you to hold **BOOTSEL** on the Pico and plug the Pico into a USB port
-   of the Pi.
+2. It asks you to put the Pico into flash mode. The SKR Pico V1.0 has no
+   BOOTSEL button; instead:
+   1. Switch on the machine's 24 V supply.
+   2. Put a jumper on the Pico's **BOOT** pins.
+   3. Connect the Pico to a USB port of the Pi with a data cable, plug fully in.
+   4. Press **RESET** on the Pico.
+   5. **Remove the BOOT jumper** when the script asks, before it writes
+      anything. The Pico checks the jumper at every reset; left on, it restarts
+      into flash mode instead of the new firmware.
 3. It writes `katapult.uf2` to the `RPI-RP2` drive that appears, together with
    an erased application sector. A Pico that ran other firmware before then
    behaves like a new one: Katapult finds no application and waits on the UART.
@@ -86,8 +93,12 @@ In Mainsail: the `pico` temperature is shown, and the axes move after homing.
 
 The script waits 120 seconds for a drive with that label.
 
-- BOOTSEL must be held **while plugging in**, not afterwards.
-- Some USB-C cables carry power only. Use a data cable.
+- The BOOT jumper must be on **when RESET is pressed**; fitting it afterwards
+  does nothing until the next reset.
+- The Pico needs power: the machine's 24 V supply on. Without it, only the
+  board's USB-power jumper powers it from USB (remove that jumper afterwards).
+- Some USB-C cables carry power only. Use a data cable, and push the plug in
+  fully — a half-seated plug shows no USB device at all.
 - Check whether the Pi sees the device at all: `lsusb | grep 2e8a`
   (`2e8a:0003` is the RP2040 in BOOTSEL mode).
 
