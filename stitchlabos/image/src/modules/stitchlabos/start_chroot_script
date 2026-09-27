@@ -15,6 +15,10 @@ apt-get install -y avahi-daemon
 
 # Unpack system config files (dnsmasq-shared.d, etc.)
 unpack /filesystem/etc /etc root
+# The WiFi manager's sudo rule: sudo ignores a drop-in with the wrong mode, and
+# a broken one locks sudo for everyone, so fail the build instead.
+chmod 0440 /etc/sudoers.d/020-stitchlab-wifi
+visudo -cf /etc/sudoers.d/020-stitchlab-wifi
 # Moonraker components under usr/local/lib/stitchlabos; symlinked below.
 unpack /filesystem/usr /usr root
 

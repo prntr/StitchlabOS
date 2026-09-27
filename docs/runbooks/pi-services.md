@@ -96,7 +96,7 @@ journalctl -u AccessPopup.service -n 30
 curl http://localhost:7125/server/wifi/status
 ```
 
-The `wifi_manager.py` Moonraker component lives in `/home/pi/moonraker/moonraker/components/`. It uses `nmcli` for all WiFi operations (requires `pi ALL=(ALL) NOPASSWD: ALL` in sudoers).
+The `wifi_manager.py` Moonraker component lives in `/home/pi/moonraker/moonraker/components/`. It uses `sudo -n nmcli` for all WiFi changes and, while `wlan0` runs the access point, `sudo -n /usr/sbin/iw dev wlan0 scan ap-force` for the network list (NetworkManager does not scan in AP mode). The image allows exactly these in `/etc/sudoers.d/020-stitchlab-wifi`; `sudo -n -l` as `pi` must list both. Images up to v0.1.0-beta.4 lack the file, so every WiFi change and the AP-mode scan fail there.
 
 ## SKR Pico (UART)
 
