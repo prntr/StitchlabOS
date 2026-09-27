@@ -1,6 +1,9 @@
 [Unit]
 Description=Live Jog Daemon for Klipper
-Documentation=https://github.com/yourusername/KlipperLiveControl
+# The daemon's source repo is not public; the runbook is, and the daemon's
+# header is on every machine.
+Documentation=https://github.com/prntr/StitchlabOS/blob/main/docs/runbooks/pi-services.md#live_jogd
+Documentation=file:/home/pi/live_jogd/live_jogd.py
 After=klipper.service moonraker.service nginx.service
 Requires=klipper.service moonraker.service
 # Limits crash loops of the daemon itself. The interval must be longer than
