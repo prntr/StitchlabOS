@@ -3,9 +3,10 @@ Description=Live Jog Daemon for Klipper
 Documentation=https://github.com/yourusername/KlipperLiveControl
 After=klipper.service moonraker.service nginx.service
 Requires=klipper.service moonraker.service
-# on-failure + burst limit prevents the 3-second respawn loop that
-# previously hammered systemd/journal on dongle-less Pis.
-StartLimitIntervalSec=60
+# Limits crash loops of the daemon itself. The interval must be longer than
+# three start cycles: with 60 s, a 33 s cycle never reached the burst and a
+# dongle-less Pi restarted for hours (673 times on a beta.4 machine).
+StartLimitIntervalSec=300
 StartLimitBurst=3
 
 [Service]
@@ -13,10 +14,13 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/live_jogd
-ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -e /dev/stitchlab-dongle ] && exit 0; sleep 1; done; exit 1'
+# No dongle is not a failure: give a just-plugged dongle 30 s to enumerate,
+# then skip the start. ExecCondition exiting 1 leaves the unit inactive
+# without marking it failed, so Restart= does not loop.
+ExecCondition=/bin/sh -c 'for i in $(seq 1 30); do [ -e /dev/stitchlab-dongle ] && exit 0; sleep 1; done; echo "No StitchLab dongle at /dev/stitchlab-dongle, not starting"; exit 1'
 ExecStartPre=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi on
 ExecStart=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/live_jogd.py
-ExecStopPost=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi off
+ExecStopPost=/bin/sh -c '[ -e /dev/stitchlab-dongle ] || exit 0; exec /home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi off'
 # Service is user-triggered from the Mainsail Controller menu
 # (machine.services.start { service: "live_jogd" }). It is intentionally
 # *not* WantedBy=multi-user.target — see P0-2 of the Cross-Platform
