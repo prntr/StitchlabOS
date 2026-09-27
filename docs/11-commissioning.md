@@ -51,8 +51,11 @@ stitchlab-flash-pico
 
 The script walks through it:
 
-1. It stops `klipper`, which otherwise holds `/dev/serial0`.
-2. It asks you to put the Pico into flash mode. The SKR Pico V1.0 has no
+1. It asks for the password of user `pi` (the same as for SSH): it needs `sudo`.
+   A wrong password or an unanswered prompt ends the script with a message
+   saying so; run it again.
+2. It stops `klipper`, which otherwise holds `/dev/serial0`.
+3. It asks you to put the Pico into flash mode. The SKR Pico V1.0 has no
    BOOTSEL button; instead:
    1. Switch on the machine's 24 V supply.
    2. Put a jumper on the Pico's **BOOT** pins.
@@ -61,12 +64,12 @@ The script walks through it:
    5. **Remove the BOOT jumper** when the script asks, before it writes
       anything. The Pico checks the jumper at every reset; left on, it restarts
       into flash mode instead of the new firmware.
-3. It writes `katapult.uf2` to the `RPI-RP2` drive that appears, together with
+4. It writes `katapult.uf2` to the `RPI-RP2` drive that appears, together with
    an erased application sector. A Pico that ran other firmware before then
    behaves like a new one: Katapult finds no application and waits on the UART.
-4. After the Pico reboots, it flashes `klipper.bin` over `/dev/serial0` (up to
+5. After the Pico reboots, it flashes `klipper.bin` over `/dev/serial0` (up to
    three attempts — the RP2040 occasionally misses the first serial resync).
-5. It restarts `klipper` and checks `klippy.log` for the MCU.
+6. It restarts `klipper` and checks `klippy.log` for the MCU.
 
 **The USB cable is needed exactly once.** Once Katapult is on the board, every
 further firmware update runs over the same UART lines:

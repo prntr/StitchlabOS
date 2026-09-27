@@ -59,6 +59,25 @@ say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
 fail() { printf '\n\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# set -e ends the script at the first failing command. Say which one, or a
+# failed step looks as if the script had simply stopped.
+set -E
+on_error() {
+    printf '\n\033[31mERROR: "%s" failed with exit code %s (line %s).\033[0m\n' "$2" "$3" "$1" >&2
+}
+trap 'on_error "$LINENO" "$BASH_COMMAND" "$?"' ERR
+
+# Every path needs root: stopping klipper, mounting the Pico, running
+# flashtool. Ask once, up front, and say so when it fails — a wrong password
+# or a prompt nobody answered used to end the script without a word.
+ensure_sudo() {
+    if sudo -n true 2>/dev/null; then
+        return 0
+    fi
+    info "This needs root: sudo asks for the password of user ${USER:-pi}."
+    sudo -v || fail "sudo failed (wrong password, or the prompt timed out). Run stitchlab-flash-pico again and enter the password of user ${USER:-pi}."
+}
+
 require_file() {
     [ -s "$1" ] || fail "$1 is missing or empty. Was this image built by CI with the firmware job?"
 }
@@ -67,15 +86,16 @@ require_file() {
 KLIPPER_WAS_ACTIVE=0
 release_serial() {
     if systemctl is-active --quiet klipper; then
-        KLIPPER_WAS_ACTIVE=1
         info "Stopping klipper (it holds ${SERIAL})"
-        sudo systemctl stop klipper
+        sudo systemctl stop klipper || fail "Could not stop klipper, which holds ${SERIAL}."
+        KLIPPER_WAS_ACTIVE=1
     fi
 }
 restore_klipper() {
     if [ "$KLIPPER_WAS_ACTIVE" = "1" ]; then
         info "Starting klipper again"
-        sudo systemctl start klipper || true
+        sudo systemctl start klipper \
+            || info "Could not start klipper again. Start it with: sudo systemctl start klipper"
     fi
 }
 
@@ -249,6 +269,7 @@ verify_mcu() {
 say "StitchLAB SKR Pico Firmware"
 info "Firmware:  ${FW_DIR}"
 info "Serial:    ${SERIAL} @ ${BAUD}"
+ensure_sudo
 
 case "$MODE" in
     bootsel)
