@@ -309,7 +309,7 @@ Each layer alone wasn't the problem; the combination was. Evidence: same AP conf
 |-------|--------|----------|
 | Kernel Wi-Fi | `iw dev wlan0 set power_save off` after `klipper.service` is up — keeps radio awake for Moonraker PINGs but preserves the boot-time power protection that stops radio-wake spikes from corrupting SKR Pico UART init | [`wlan0-powersave-off.service`](../../stitchlabos/image/src/modules/stitchlabos/filesystem/etc/systemd/system/wlan0-powersave-off.service) |
 | Moonraker | `websocket_ping_interval=30, websocket_ping_timeout=25` (was 10/~25) — tolerates a full ping cycle of jitter | `[stitchlab_ws_tuning]` in `moonraker.conf` — component [`stitchlab_ws_tuning.py`](../../stitchlabos/image/src/modules/stitchlabos/filesystem/usr/local/lib/stitchlabos/moonraker/stitchlab_ws_tuning.py) sets both values in Tornado's settings at startup, without editing Moonraker's files |
-| Frontend | `server.info` keepalive every 10 s, heartbeat armed on `onopen`, exponential backoff reconnect (1 → 30 s, no ceiling), fix latent `removeWaitById` index-0 bug | [`webSocketClient.ts`](../../mainsail/src/plugins/webSocketClient.ts) |
+| Frontend | `server.info` keepalive every 10 s, heartbeat armed on `onopen`, exponential backoff reconnect (1 → 30 s, no ceiling), fix latent `removeWaitById` index-0 bug | [`webSocketClient.ts`](https://github.com/prntr/mainsail/blob/0655e0fb0142e0c5dbbc4a87a14c3bd37d8993b5/src/plugins/webSocketClient.ts) |
 
 **Residual behavior (accepted):**
 Chromium-based browsers aggressively throttle `setInterval` in *backgrounded* tabs (≥1 min after ~5 min hidden), which pauses the 10 s keepalive. This can cause an occasional clean reconnect when the user refocuses a long-backgrounded Mainsail tab. Safari does not throttle as aggressively. Reconnects are fast (<1 s) and transparent; not considered a bug. Full fix scoped for a future RC in [proposals/websocket-worker-isolation.md](../proposals/websocket-worker-isolation.md) (move WebSocket into a Dedicated Web Worker — unaffected by main-thread throttling, supported by all target browsers).
@@ -418,7 +418,7 @@ dns-sd -G v4 stitchlab.local  # macOS
 
 **Root Cause Found:** The "remote mode" message appears because `instancesDB` was set to `"browser"` instead of `"moonraker"`.
 
-**Source Code Reference:** [TheSelectPrinterDialog.vue:226](../../mainsail/src/components/TheSelectPrinterDialog.vue#L226)
+**Source Code Reference:** [TheSelectPrinterDialog.vue:226](https://github.com/prntr/mainsail/blob/0655e0fb0142e0c5dbbc4a87a14c3bd37d8993b5/src/components/TheSelectPrinterDialog.vue#L226)
 ```vue
 <template v-if="instancesDB === 'browser'">
     <!-- Remote mode dialog shown here -->

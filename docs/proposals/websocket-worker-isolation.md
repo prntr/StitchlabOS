@@ -23,7 +23,7 @@ Run the WebSocket client inside a per-tab Web Worker. Main thread communicates v
 **Pros:**
 - Supported in every browser we care about (IE10+, all Safari versions, Firefox, Chrome, Edge, iOS Safari).
 - Workers are not subject to main-thread `setInterval` throttling. Chrome's intensive throttling *does* reach workers in long-hidden tabs (~5 min hidden) but remains far more permissive than main-thread throttling.
-- Straightforward migration path from the current [webSocketClient.ts](../mainsail/src/plugins/webSocketClient.ts).
+- Straightforward migration path from the current [webSocketClient.ts](https://github.com/prntr/mainsail/blob/0655e0fb0142e0c5dbbc4a87a14c3bd37d8993b5/src/plugins/webSocketClient.ts).
 - No cross-tab coordination required.
 
 **Cons:**

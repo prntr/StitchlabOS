@@ -2,7 +2,7 @@
 
 The Status Panel replaces the standard 3D-printing thumbnail with embroidery-specific components when the StitchLab theme is active. Two components work together: a canvas-based design preview and an embroidery stats bar.
 
-> **Architecture note (P0-4, v2.17.0):** The dashboard MUST NOT fetch the full active G-Code file or parse stitch paths in the browser. Both components source all data from Moonraker file metadata (`printer.current_file`) and a design thumbnail — no full-file download, no browser-side parser. This is a hard constraint from the Cross-Platform Stability plan; see [../Reports&Plans/Cross-Platform Mainsail Stabilitiy.md](../../Reports&Plans/Cross-Platform%20Mainsail%20Stabilitiy.md) P0-4. `parseEmbroideryGcode.ts` is retained but only used by `GCodeStudio2D.vue`.
+> **Architecture note (P0-4, v2.17.0):** The dashboard MUST NOT fetch the full active G-Code file or parse stitch paths in the browser. Both components source all data from Moonraker file metadata (`printer.current_file`) and a design thumbnail — no full-file download, no browser-side parser. This is a hard constraint from the Cross-Platform Stability plan; see `../../Reports&Plans/Cross-Platform Mainsail Stabilitiy.md` P0-4. `parseEmbroideryGcode.ts` is retained but only used by `GCodeStudio2D.vue`.
 
 ## Current status
 
@@ -111,4 +111,4 @@ Detection uses: `(this.$store.state.gui.uiSettings?.theme ?? '') === 'stitchlab'
 - [mainsail-theme.md](mainsail-theme.md) — StitchLab theme that activates embroidery mode
 - [gcode-studio.md](gcode-studio.md) — Full-page 2D viewer (uses `parseEmbroideryGcode.ts`)
 - [embroidery-dashboard-preview-plan.md](embroidery-dashboard-preview-plan.md) — Original implementation plan (describes the old live-parsing approach; superseded)
-- [../../Reports&Plans/G-Code Intake Stable Job Preview Plan.md](../../Reports%26Plans/G-Code%20Intake%20Stable%20Job%20Preview%20Plan.md) — Intake plan (producer side)
+- `../../Reports&Plans/G-Code Intake Stable Job Preview Plan.md` — Intake plan (producer side)

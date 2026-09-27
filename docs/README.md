@@ -60,7 +60,7 @@ is for people changing StitchLabOS itself.
 
 ## AI Agent Integration
 
-- [WebMCP Setup](../MCP/webmcp/README.md) - Connect AI agents (Claude, Cursor, Codex) to the Mainsail UI via MCP
+- [WebMCP Setup](03-quickstart-local.md#4-optional-connect-an-ai-agent-via-webmcp) - Connect AI agents (Claude, Cursor, Codex) to the Mainsail UI via MCP
 
 ## External
 
