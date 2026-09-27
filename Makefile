@@ -1,5 +1,5 @@
 # Agent-Kontrakt -- siehe ~/Code/_std/AGENTS.base.md
-.PHONY: setup dev sim test lint check status help
+.PHONY: setup dev sim test test-intake lint check status help
 .DEFAULT_GOAL := help
 
 # Meta-Repo fuer StitchLabOS: ein Raspberry-Pi-Image, das Klipper, Moonraker,
@@ -22,8 +22,15 @@ dev:     ## Mainsail-Oberflaeche lokal ausliefern
 sim:     ## virtuellen Klipper-Drucker starten (Docker)
 	cd virtual-klipper-printer && docker compose up -d
 
-test:    ## Tests der Mainsail-Oberflaeche
+INTAKE = stitchlabos/image/src/modules/stitchlab-intake
+
+test: test-intake  ## Tests: G-Code-Intake, dann die Mainsail-Oberflaeche
 	cd mainsail && npm test
+
+test-intake:  ## Tests des G-Code-Intake (pytest in uv, Python wie auf dem Pi)
+	cd $(INTAKE) && uv run --no-project --python 3.13 --with pytest \
+	  --with-requirements filesystem/home/pi/stitchlab_intake/requirements.txt \
+	  pytest -q tests
 
 lint:    ## Mainsail-Linter + tote Verweise in der Doku
 	cd mainsail && npm run lint

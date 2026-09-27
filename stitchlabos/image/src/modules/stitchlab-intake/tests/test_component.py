@@ -281,6 +281,49 @@ def test_recheck_invalidates_cache(tmp_path):
     _run(go())
 
 
+def test_upload_and_recheck_keep_out_of_hoop_design_blocked(tmp_path):
+    # Found on hardware with beta.4: a square at X 70..90 in the 80 mm hoop
+    # was blocked by prepare, but upload and recheck (no hoop given) called
+    # it valid because the CLI then skipped the hoop check.
+    fa = FakeAdapter()
+    core = _make_core(tmp_path, fa)
+    (tmp_path / "hoops.json").write_text(json.dumps({
+        "default": "standard",
+        "hoops": {"standard": {"hoop_id": "standard",
+                               "usable_width_mm": 80,
+                               "usable_height_mm": 130}},
+    }))
+    (core.cfg.gcodes_root / "outside.gcode").write_text(
+        "G21\nG90\nG1 X70 Y22 F1500\nG1 X90 Y22\nG1 X90 Y42\nG1 X70 Y42\n"
+        "G1 X70 Y22\n"
+    )
+
+    def verdicts() -> list:
+        return [e[1]["state"] for e in fa.events
+                if e[1].get("filename") == "outside.gcode"
+                and e[1].get("state") not in ("queued", "running")]
+
+    async def wait_for_verdicts(n: int) -> None:
+        for _ in range(500):
+            if len(verdicts()) >= n:
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(f"no verdict: {fa.events}")
+
+    async def go():
+        core.start()
+        await core.enqueue_analyze("outside.gcode")
+        await wait_for_verdicts(1)
+        await core.recheck("outside.gcode")
+        await wait_for_verdicts(2)
+        assert verdicts() == ["blocked", "blocked"]
+        meta = await core.metadata("outside.gcode")
+        assert [d["code"] for d in meta["errors"]] == ["DESIGN_OUTSIDE_HOOP"]
+        await core.stop()
+
+    _run(go())
+
+
 def test_cancel_queued_task(tmp_path):
     fa = FakeAdapter()
     core = _make_core(tmp_path, fa)

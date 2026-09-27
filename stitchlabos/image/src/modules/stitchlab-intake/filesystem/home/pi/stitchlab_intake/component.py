@@ -182,7 +182,11 @@ class IntakeCore:
         existing = self._index.get(filename)
         if existing and not existing.future.done():
             return {"filename": filename, "state": "queued", "duplicate": True}
-        task = Task(filename=filename, kind="analyze", hoop_id=hoop_id)
+        # Upload and recheck arrive without a hoop. Without one the CLI skips
+        # the hoop check entirely, so the file list would show "valid" for a
+        # design outside the frame — analyse against the default hoop instead.
+        task = Task(filename=filename, kind="analyze",
+                    hoop_id=hoop_id or self.cfg.default_hoop)
         self._index[filename] = task
         await self._queue.put(task)
         self._emit(filename, "queued", queue_size=self._queue.qsize())
