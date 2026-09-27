@@ -110,6 +110,46 @@ echo "pi:lab" | chpasswd
 # Enable SSH for headless access
 systemctl enable ssh
 
+# Raspberry Pi's cloud-init dropped its netplan_nm_patch module in
+# 25.2-1~bpo13+1+rpt19 but still lists it in /etc/cloud/cloud.cfg, so every
+# boot ends "degraded done" (raspberrypi/trixie-feedback#45). cloud.cfg is a
+# dpkg conffile: editing it would stop the next cloud-init upgrade at a prompt.
+# Re-declare each affected module list in a drop-in instead, and only while the
+# module is really missing, so an upstream fix turns this into a no-op.
+python3 - <<'EOF'
+import importlib.util
+import yaml
+from cloudinit import util
+
+MODULE = "netplan_nm_patch"
+DROPIN = "/etc/cloud/cloud.cfg.d/90_stitchlabos-cloud-modules.cfg"
+
+def name(entry):
+    return entry[0] if isinstance(entry, list) else entry
+
+if importlib.util.find_spec("cloudinit.config.cc_" + MODULE):
+    print(f"cloud-init ships cc_{MODULE}; nothing to do")
+    raise SystemExit(0)
+with open("/etc/cloud/cloud.cfg") as f:
+    base = yaml.safe_load(f)
+lists = {
+    key: [e for e in base[key] if name(e) != MODULE]
+    for key in ("cloud_init_modules", "cloud_config_modules", "cloud_final_modules")
+    if any(name(e) == MODULE for e in base.get(key) or [])
+}
+if not lists:
+    print(f"cloud.cfg does not list {MODULE}; nothing to do")
+    raise SystemExit(0)
+with open(DROPIN, "w") as f:
+    f.write(f"# StitchLabOS: cloud.cfg lists {MODULE}, which this cloud-init does not ship.\n")
+    yaml.safe_dump(lists, f, default_flow_style=False, sort_keys=True)
+merged = util.read_conf_with_confd("/etc/cloud/cloud.cfg")
+left = [k for k in lists if any(name(e) == MODULE for e in merged.get(k) or [])]
+if left:
+    raise SystemExit(f"{DROPIN} did not take effect: {MODULE} still in {left}")
+print(f"{DROPIN}: dropped {MODULE} from {sorted(lists)}")
+EOF
+
 # Enable UART for SKR Pico connection (GPIO14/15 ↔ Pico UART)
 # - enable_uart=1: activates the hardware UART on GPIO14/15
 # - disable-bt overlay: frees the PL011 UART from Bluetooth (gives it to GPIO pins)
