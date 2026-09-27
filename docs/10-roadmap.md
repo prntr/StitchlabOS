@@ -52,7 +52,7 @@ computer, no toolchain, no knowledge of the repo.
 | `moonraker.asvc` seeded with upstream defaults, not just `live_jogd` | done |
 | [11-commissioning.md](11-commissioning.md) as one continuous path | done |
 | Commissioning guide attached to each release, matching that image | done |
-| **Run on real hardware — someone else's card, someone else's Pico** | **open** |
+| **Run on real hardware — someone else's card, someone else's Pico** | **open** — first run 2026-09-27 on beta.4: [report](reports/2026-09-27-v0.1.0-beta.4-commissioning.md), step 3 failed |
 | Assembly instructions from `Bauplan` joined up with the software path | open |
 
 The last two are the ones that count: Beta2 is finished when somebody other
