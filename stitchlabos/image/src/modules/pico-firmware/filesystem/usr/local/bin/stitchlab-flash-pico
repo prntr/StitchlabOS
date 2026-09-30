@@ -11,8 +11,10 @@
 #   2. UART: once Katapult is on the Pico, Klipper is flashed over
 #      /dev/serial0 — the same wires Klipper talks on. No cable, no jumper.
 #
-# Running it with no arguments does the right thing: it looks for a Pico in
-# BOOTSEL mode, and otherwise goes straight to the UART path.
+# Running it with no arguments does the right thing: it uses a Pico that is
+# already in BOOTSEL mode, and otherwise walks you into flash mode, or on to
+# the UART path when you say Katapult is already on the board. It never
+# guesses which of the two applies.
 
 set -euo pipefail
 
@@ -30,7 +32,16 @@ FLASHTOOL="/home/pi/katapult/scripts/flashtool.py"
 PY="/home/pi/klippy-env/bin/python"
 
 BOOTSEL_LABEL="RPI-RP2"
-BOOTSEL_WAIT="${BOOTSEL_WAIT:-120}"
+# Without a terminal nobody can say when RESET was pressed, so wait long: the
+# four physical steps took a person just over two minutes in the 2026-09-28
+# commissioning run, where a 120-second wait ran out two seconds too early.
+BOOTSEL_WAIT="${BOOTSEL_WAIT:-300}"
+# With a terminal the operator presses Enter after RESET; the drive then
+# appears within seconds.
+BOOTSEL_SETTLE="${BOOTSEL_SETTLE:-15}"
+# acquire_bootsel's exit status when the operator says Katapult is already on
+# the Pico (0 is a drive, 1 is none).
+BOOTSEL_SKIP=3
 MOUNTPOINT="/run/stitchlab-pico-bootsel"
 
 MODE="auto"
@@ -138,37 +149,102 @@ find_bootsel_device() {
     return 0
 }
 
-wait_for_bootsel() {
+is_interactive() {
+    [ -t 0 ]
+}
+
+# Poll for the drive for up to $1 seconds; prints its device path when found.
+poll_bootsel() {
     local dev deadline
+    deadline=$(( $(date +%s) + $1 ))
+    while :; do
+        dev="$(find_bootsel_device)"
+        if [ -n "$dev" ]; then
+            echo "$dev"
+            return 0
+        fi
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
+        sleep 2
+    done
+}
+
+show_bootsel_steps() {
+    say "Put the SKR Pico into flash mode (BOOTSEL)"
+    info "1. Switch on the machine's 24 V supply"
+    info "2. Put a jumper on the Pico's BOOT pins"
+    info "3. Connect the Pico to a USB port of the Pi (data cable, plug fully in)"
+    info "4. Press RESET on the Pico"
+    info "I will ask you to remove the jumper before anything is written."
+}
+
+show_bootsel_checklist() {
+    say "No ${BOOTSEL_LABEL} drive appeared"
+    info "- Was the BOOT jumper on when RESET was pressed? Fitting it afterwards does nothing."
+    info "- Is the 24 V supply on?"
+    info "- Is the USB cable a data cable, fully plugged in? 'lsusb | grep 2e8a' should list 2e8a:0003."
+}
+
+# Ask until the answer is one of the offered letters; prints it lowercased.
+ask_choice() {
+    local prompt="$1" allowed="$2" answer
+    while :; do
+        printf '\n  %s' "$prompt" >&2
+        read -r answer || return 1
+        answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
+        case " $allowed " in
+            *" ${answer:-enter} "*) echo "${answer:-enter}"; return 0 ;;
+        esac
+        info "Please answer with one of: ${allowed}" >&2
+    done
+}
+
+# Find the Pico in flash mode. Prints the device path and returns 0, returns
+# BOOTSEL_SKIP when the operator says Katapult is already on the Pico (only
+# offered with "skip" as $1), and 1 when there is no drive. Callers capture
+# stdout as the device path, so every message goes to stderr.
+acquire_bootsel() {
+    local offer_skip="${1:-}" dev choice
+    # Its non-zero exits are answers, not failures. This runs in a command
+    # substitution, so clearing the ERR trap here does not reach the caller;
+    # bash 3.2 would otherwise report "return 1" as a failed command.
+    trap - ERR
     dev="$(find_bootsel_device)"
     if [ -n "$dev" ]; then
         echo "$dev"
         return 0
     fi
 
-    # Callers capture this function's stdout as the device path, so every
-    # message here has to go to stderr or it ends up inside "$dev".
-    {
-        say "Put the SKR Pico into flash mode (BOOTSEL)"
-        info "1. Switch on the machine's 24 V supply"
-        info "2. Put a jumper on the Pico's BOOT pins"
-        info "3. Connect the Pico to a USB port of the Pi (data cable, plug fully in)"
-        info "4. Press RESET on the Pico"
-        info "I will ask you to remove the jumper before anything is written."
-        info ""
-        info "Waiting up to ${BOOTSEL_WAIT}s for a drive labelled ${BOOTSEL_LABEL} ..."
-    } >&2
+    show_bootsel_steps >&2
 
-    deadline=$(( $(date +%s) + BOOTSEL_WAIT ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
-        dev="$(find_bootsel_device)"
-        if [ -n "$dev" ]; then
-            echo "$dev"
+    if ! is_interactive; then
+        info "Not interactive: waiting up to ${BOOTSEL_WAIT}s for a drive labelled ${BOOTSEL_LABEL} ..." >&2
+        if poll_bootsel "$BOOTSEL_WAIT"; then
             return 0
         fi
-        sleep 2
+        return 1
+    fi
+
+    local first_prompt="Press Enter once RESET is pressed: "
+    if [ -n "$offer_skip" ]; then
+        first_prompt="Press Enter once RESET is pressed, or type u if Katapult is already on this Pico (flash Klipper over the UART): "
+    fi
+    choice="$(ask_choice "$first_prompt" "enter${offer_skip:+ u}")" || return 1
+    while :; do
+        if [ "$choice" = "u" ]; then
+            return "$BOOTSEL_SKIP"
+        fi
+        info "Looking for ${BOOTSEL_LABEL} for up to ${BOOTSEL_SETTLE}s ..." >&2
+        if poll_bootsel "$BOOTSEL_SETTLE"; then
+            return 0
+        fi
+        show_bootsel_checklist >&2
+        if [ -n "$offer_skip" ]; then
+            choice="$(ask_choice "r = look again, u = Katapult is already on this Pico (UART), q = quit: " "r u q")" || return 1
+        else
+            choice="$(ask_choice "r = look again, q = quit: " "r q")" || return 1
+        fi
+        [ "$choice" != "q" ] || return 1
     done
-    return 1
 }
 
 # The RP2040 checks BOOT at every reset. A jumper still on when the UF2 lands
@@ -182,14 +258,14 @@ confirm_boot_jumper_removed() {
     fi
 }
 
-flash_via_bootsel() {
-    local uf2="$1" label="$2" dev
-    require_file "$uf2"
+NO_BOOTSEL_MESSAGE="No ${BOOTSEL_LABEL} drive found. Is the 24 V supply on, the BOOT jumper fitted, the USB cable a data cable and fully seated, and was RESET pressed?"
 
-    if ! dev="$(wait_for_bootsel)"; then
-        fail "No ${BOOTSEL_LABEL} drive found. Is the 24 V supply on, the BOOT jumper fitted, the USB cable a data cable and fully seated, and was RESET pressed?"
-    fi
-    info "Found: ${dev}"
+# $1 is the drive from acquire_bootsel: looking for it again here printed
+# "Found" twice in auto mode.
+flash_via_bootsel() {
+    local dev="$1" uf2="$2" label="$3"
+    require_file "$uf2"
+    info "Found ${BOOTSEL_LABEL} at ${dev}."
     confirm_boot_jumper_removed
 
     sudo mkdir -p "$MOUNTPOINT"
@@ -266,42 +342,57 @@ verify_mcu() {
 }
 
 # --- Main -------------------------------------------------------------------
-say "StitchLAB SKR Pico Firmware"
-info "Firmware:  ${FW_DIR}"
-info "Serial:    ${SERIAL} @ ${BAUD}"
-ensure_sudo
+main() {
+    local dev rc
+    say "StitchLAB SKR Pico Firmware"
+    info "Firmware:  ${FW_DIR}"
+    info "Serial:    ${SERIAL} @ ${BAUD}"
+    ensure_sudo
 
-case "$MODE" in
-    bootsel)
-        release_serial
-        prepare_katapult
-        flash_via_bootsel "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
-        info "The Pico now waits in Katapult. Flash Klipper with: stitchlab-flash-pico --uart"
-        ;;
-    uart)
-        release_serial
-        flash_via_uart
-        verify_mcu || true
-        ;;
-    standalone)
-        release_serial
-        flash_via_bootsel "$KLIPPER_STANDALONE_UF2" "Klipper (standalone, no Katapult)"
-        verify_mcu || true
-        ;;
-    auto)
-        release_serial
-        if dev="$(wait_for_bootsel)"; then
-            info "Found ${BOOTSEL_LABEL} at ${dev}."
+    case "$MODE" in
+        bootsel)
+            release_serial
             prepare_katapult
-            flash_via_bootsel "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
-        else
-            say "No Pico appeared in BOOTSEL mode within ${BOOTSEL_WAIT}s"
-            info "Continuing over the UART, assuming Katapult is already on the Pico."
-            info "If that is not the case, run 'stitchlab-flash-pico --bootsel'."
-        fi
-        flash_via_uart
-        verify_mcu || true
-        ;;
-esac
+            dev="$(acquire_bootsel)" || fail "$NO_BOOTSEL_MESSAGE"
+            flash_via_bootsel "$dev" "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
+            info "The Pico now waits in Katapult. Flash Klipper with: stitchlab-flash-pico --uart"
+            ;;
+        uart)
+            release_serial
+            flash_via_uart
+            verify_mcu || true
+            ;;
+        standalone)
+            release_serial
+            dev="$(acquire_bootsel)" || fail "$NO_BOOTSEL_MESSAGE"
+            flash_via_bootsel "$dev" "$KLIPPER_STANDALONE_UF2" "Klipper (standalone, no Katapult)"
+            verify_mcu || true
+            ;;
+        auto)
+            release_serial
+            rc=0
+            dev="$(acquire_bootsel skip)" || rc=$?
+            case "$rc" in
+                0)
+                    prepare_katapult
+                    flash_via_bootsel "$dev" "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
+                    ;;
+                "$BOOTSEL_SKIP")
+                    info "Skipping flash mode: Katapult is on the Pico, as you said."
+                    ;;
+                *)
+                    fail "${NO_BOOTSEL_MESSAGE} If Katapult is already on this Pico, run 'stitchlab-flash-pico --uart' instead."
+                    ;;
+            esac
+            flash_via_uart
+            verify_mcu || true
+            ;;
+    esac
 
-say "Done."
+    say "Done."
+}
+
+# Sourced by the tests, which call the functions without touching hardware.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi

@@ -60,7 +60,10 @@ The script walks through it:
    1. Switch on the machine's 24 V supply.
    2. Put a jumper on the Pico's **BOOT** pins.
    3. Connect the Pico to a USB port of the Pi with a data cable, plug fully in.
-   4. Press **RESET** on the Pico.
+   4. Press **RESET** on the Pico, then press **Enter** in the script. If
+      Katapult is already on this Pico (it was commissioned with this script
+      before), type `u` instead: the script skips flash mode and goes on over
+      the UART.
    5. **Remove the BOOT jumper** when the script asks, before it writes
       anything. The Pico checks the jumper at every reset; left on, it restarts
       into flash mode instead of the new firmware.
@@ -94,7 +97,11 @@ In Mainsail: the `pico` temperature is shown, and the axes move after homing.
 
 ### No `RPI-RP2` drive appears
 
-The script waits 120 seconds for a drive with that label.
+After Enter, the script looks for a drive with that label for 15 seconds.
+If none appears, it shows this checklist and asks whether to look again, to go
+on over the UART (auto mode only, for a Pico that already has Katapult), or to
+quit. It never goes on by itself. Run without a terminal, it waits 300 seconds
+and then stops.
 
 - The BOOT jumper must be on **when RESET is pressed**; fitting it afterwards
   does nothing until the next reset.
