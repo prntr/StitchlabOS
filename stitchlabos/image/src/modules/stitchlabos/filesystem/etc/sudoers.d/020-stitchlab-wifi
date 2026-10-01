@@ -1,5 +1,7 @@
 # StitchLabOS WiFi manager (Moonraker component wifi_manager, runs as pi).
 # nmcli changes connections and the access point; the iw line is the one
-# scan that works while wlan0 runs the AP. Keep it identical to IW_AP_SCAN
-# in stitchlabos-config/moonraker/components/wifi_manager.py.
-pi ALL=(root) NOPASSWD: /usr/bin/nmcli, /usr/sbin/iw dev wlan0 scan ap-force
+# scan that works while wlan0 runs the AP; the two systemctl lines hold AP
+# mode chosen in Mainsail against AccessPopup's timer. Keep the iw and
+# systemctl lines identical to IW_AP_SCAN, TIMER_STOP and TIMER_START in
+# stitchlabos-config/moonraker/components/wifi_manager.py.
+pi ALL=(root) NOPASSWD: /usr/bin/nmcli, /usr/sbin/iw dev wlan0 scan ap-force, /usr/bin/systemctl stop AccessPopup.timer, /usr/bin/systemctl start AccessPopup.timer
