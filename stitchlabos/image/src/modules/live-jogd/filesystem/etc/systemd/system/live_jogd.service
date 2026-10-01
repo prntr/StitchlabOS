@@ -6,21 +6,19 @@ Documentation=https://github.com/prntr/StitchlabOS/blob/main/docs/runbooks/pi-se
 Documentation=file:/home/pi/live_jogd/live_jogd.py
 After=klipper.service moonraker.service nginx.service
 Requires=klipper.service moonraker.service
-# Limits crash loops of the daemon itself. The interval must be longer than
-# three start cycles: with 60 s, a 33 s cycle never reached the burst and a
-# dongle-less Pi restarted for hours (673 times on a beta.4 machine).
-StartLimitIntervalSec=300
-StartLimitBurst=3
+# No dongle, no start, decided at once: there is no waiting process that a
+# click could kill. A skipped condition leaves the unit inactive, not failed.
+ConditionPathExists=/dev/stitchlab-dongle
+# No start limit: it counted the user's clicks too, and three of them within
+# 300 s left the unit failed (2026-09-28 commissioning run). A crashing
+# daemon is slowed down by the growing RestartSec below instead.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/live_jogd
-# No dongle is not a failure: give a just-plugged dongle 30 s to enumerate,
-# then skip the start. ExecCondition exiting 1 leaves the unit inactive
-# without marking it failed, so Restart= does not loop.
-ExecCondition=/bin/sh -c 'for i in $(seq 1 30); do [ -e /dev/stitchlab-dongle ] && exit 0; sleep 1; done; echo "No StitchLab dongle at /dev/stitchlab-dongle, not starting"; exit 1'
 ExecStartPre=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi on
 ExecStart=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/live_jogd.py
 ExecStopPost=/bin/sh -c '[ -e /dev/stitchlab-dongle ] || exit 0; exec /home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi off'
@@ -29,7 +27,11 @@ ExecStopPost=/bin/sh -c '[ -e /dev/stitchlab-dongle ] || exit 0; exec /home/pi/l
 # *not* WantedBy=multi-user.target — see P0-2 of the Cross-Platform
 # Mainsail Stability plan.
 Restart=on-failure
+# 3 s, growing to one start every 5 minutes over five failed restarts
+# (systemd 254 and later; the image has 257).
 RestartSec=3
+RestartSteps=5
+RestartMaxDelaySec=300
 
 # Give access to serial port
 SupplementaryGroups=dialout

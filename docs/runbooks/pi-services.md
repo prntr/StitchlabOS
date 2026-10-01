@@ -23,6 +23,7 @@ Runtime model:
 - Expected boot state is `static` + `inactive`.
 - The Mainsail Controller menu starts/stops it through Moonraker `machine.services.*`.
 - Port `7150` only listens while the service is active.
+- Without `/dev/stitchlab-dongle` a start is skipped at once (`ConditionPathExists`): the unit stays `inactive`, never `failed`, however often it is clicked. There is no start limit; a crashing daemon restarts after 3 s, the delay growing to 5 minutes over five restarts.
 
 ```bash
 # Expected before the user clicks Connect Controller
