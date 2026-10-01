@@ -20,13 +20,13 @@ Bridges StitchLabDongle (USB) to Moonraker (HTTP).
 
 Runtime model:
 - Installed on every image, but intentionally not enabled at boot.
-- Expected boot state is `static` + `inactive`.
-- The Mainsail Controller menu starts/stops it through Moonraker `machine.services.*`.
+- Plugging in the dongle starts it (udev `SYSTEMD_WANTS` in `99-stitchlab-dongle.rules`), also at boot with the dongle plugged in. Without a dongle the expected boot state is `static` + `inactive`.
+- The Mainsail Controller menu starts/stops it through Moonraker `machine.services.*`; opening the menu connects to a service that is already running. Stop holds until the next plug-in or boot.
 - Port `7150` only listens while the service is active.
 - Without `/dev/stitchlab-dongle` a start is skipped at once (`ConditionPathExists`): the unit stays `inactive`, never `failed`, however often it is clicked. There is no start limit; a crashing daemon restarts after 3 s, the delay growing to 5 minutes over five restarts.
 
 ```bash
-# Expected before the user clicks Connect Controller
+# Expected without a dongle (with one plugged in: active)
 systemctl is-enabled live_jogd       # static
 systemctl is-active live_jogd || true # inactive
 

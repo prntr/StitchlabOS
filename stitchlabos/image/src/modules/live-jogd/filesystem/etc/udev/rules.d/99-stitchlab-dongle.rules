@@ -1,4 +1,5 @@
 # StitchLab dongle: Espressif USB serial/JTAG (303a:1001), the ID of the
 # ESP32-C3 and the ESP32-C6 dongle alike.
-# Creates symlink /dev/stitchlab-dongle for the USB serial device
-SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="stitchlab-dongle"
+# Creates /dev/stitchlab-dongle, and plugging the dongle in (or booting with
+# it plugged in) starts live_jogd. A Pi without a dongle never runs it.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="stitchlab-dongle", TAG+="systemd", ENV{SYSTEMD_WANTS}+="live_jogd.service"

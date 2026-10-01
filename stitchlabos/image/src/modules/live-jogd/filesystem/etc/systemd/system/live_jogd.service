@@ -22,10 +22,11 @@ WorkingDirectory=/home/pi/live_jogd
 ExecStartPre=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi on
 ExecStart=/home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/live_jogd.py
 ExecStopPost=/bin/sh -c '[ -e /dev/stitchlab-dongle ] || exit 0; exec /home/pi/live_jogd/venv/bin/python3 /home/pi/live_jogd/dongle_api.py --wifi off'
-# Service is user-triggered from the Mainsail Controller menu
-# (machine.services.start { service: "live_jogd" }). It is intentionally
-# *not* WantedBy=multi-user.target — see P0-2 of the Cross-Platform
-# Mainsail Stability plan.
+# Started by the dongle (SYSTEMD_WANTS in 99-stitchlab-dongle.rules, also at
+# boot with the dongle plugged in) or from the Mainsail Controller menu
+# (machine.services.start). Intentionally *not* WantedBy=multi-user.target:
+# a Pi without a dongle never runs it (P0-2 of the Cross-Platform Mainsail
+# Stability plan). Stop in the menu stops it until the next plug-in or boot.
 Restart=on-failure
 # 3 s, growing to one start every 5 minutes over five failed restarts
 # (systemd 254 and later; the image has 257).
