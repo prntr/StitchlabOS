@@ -1,5 +1,5 @@
 # Agent-Kontrakt -- siehe ~/Code/_std/AGENTS.base.md
-.PHONY: setup dev sim test test-intake test-pico lint check status help
+.PHONY: setup dev sim test test-intake test-pico test-wifi lint check status help
 .DEFAULT_GOAL := help
 
 # Meta-Repo fuer StitchLabOS: ein Raspberry-Pi-Image, das Klipper, Moonraker,
@@ -25,7 +25,7 @@ sim:     ## virtuellen Klipper-Drucker starten (Docker)
 INTAKE = stitchlabos/image/src/modules/stitchlab-intake
 PICO = stitchlabos/image/src/modules/pico-firmware
 
-test: test-intake test-pico  ## Tests: Intake, Pico-Werkzeuge, dann die Mainsail-Oberflaeche
+test: test-intake test-pico test-wifi  ## Tests: Intake, Pico-Werkzeuge, WLAN-Verwaltung, dann die Mainsail-Oberflaeche
 	cd mainsail && npm test
 
 test-intake:  ## Tests des G-Code-Intake (pytest in uv, Python wie auf dem Pi)
@@ -35,6 +35,10 @@ test-intake:  ## Tests des G-Code-Intake (pytest in uv, Python wie auf dem Pi)
 
 test-pico:  ## Tests der Pico-Flash-Werkzeuge (pytest in uv, ohne Hardware)
 	cd $(PICO) && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 --with pytest \
+	  pytest -q -p no:cacheprovider tests
+
+test-wifi:  ## Tests der WLAN-Verwaltung (Moonraker-Komponente und Skripte, ohne NetworkManager)
+	cd stitchlabos-config && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 --with pytest \
 	  pytest -q -p no:cacheprovider tests
 
 lint:    ## Mainsail-Linter + tote Verweise in der Doku
