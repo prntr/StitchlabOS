@@ -46,8 +46,11 @@ path, but nothing needs configuring — the image ships ready to use.
 
 Insert the card and power the Pi. After about a minute:
 
-- **WiFi AP** `Stitchlab` (password `praxistest`) → open http://stitchlab.local
-- **SSH** `ssh pi@stitchlab.local` (password `lab`)
+- **WiFi AP** `Stitchlab-xxxx` (password `praxistest`) → open http://stitchlab-xxxx.local
+- **SSH** `ssh pi@stitchlab-xxxx.local` (password `lab`)
+
+`xxxx` are the last four hex digits of the Pi's serial number: each machine
+names itself on its first boot, so machines in one room do not collide.
 
 Mainsail loads but reports no MCU. That is expected — step 3 fixes it.
 
@@ -58,7 +61,7 @@ its first code over USB. The image carries the firmware, so this needs no second
 computer and no internet:
 
 ```bash
-ssh pi@stitchlab.local
+ssh pi@stitchlab-xxxx.local
 stitchlab-flash-pico
 ```
 
@@ -74,9 +77,9 @@ to every release, matching that image.
 
 ### 4. Stitch
 
-Open http://stitchlab.local. Upload G-code produced by
+Open http://stitchlab-xxxx.local. Upload G-code produced by
 [Ink/Stitch](https://inkstitch.org/), or program a pattern directly in
-TurtleStitch at http://stitchlab.local:3000 and send it to the machine.
+TurtleStitch at http://stitchlab-xxxx.local:3000 and send it to the machine.
 
 ## What is included
 
@@ -99,7 +102,7 @@ Mainsail update panel. After a Klipper host update, reflash the Pico with
 - **WiFi AP:** `Stitchlab` / `praxistest`, IP `192.168.50.5` — appears when no
   known network is in range
 - **SSH:** `pi` / `lab`
-- **Web UI:** http://stitchlab.local · **TurtleStitch:** `:3000` · **Moonraker:** `:7125`
+- **Web UI:** http://stitchlab-xxxx.local · **TurtleStitch:** `:3000` · **Moonraker:** `:7125`
 - **UART to the SKR Pico:** GPIO14/15, 115200 baud
 
 These are defaults for a workshop machine on a local network. Change the

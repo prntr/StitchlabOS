@@ -28,9 +28,16 @@ cannot read an `init_format` for a hand-picked image.
 
 Insert the card, power the Pi, wait about a minute.
 
-- **AP mode**: WiFi `Stitchlab`, password `praxistest`, then http://stitchlab.local
-  (or http://192.168.50.5)
-- **SSH**: `ssh pi@stitchlab.local`, password `lab`
+On this first boot the machine names itself after its board: hostname
+`stitchlab-xxxx` and access point `Stitchlab-xxxx`, where `xxxx` are the last
+four hex digits of the Pi's serial number (`cat /proc/device-tree/serial-number`).
+Reflashing the same Pi gives the same name; write it on a label. A name set in
+Imager's customisation is kept. To number the machines of a workshop instead:
+`sudo hostnamectl set-hostname stitchlab-03`.
+
+- **AP mode**: WiFi `Stitchlab-xxxx`, password `praxistest`, then
+  http://stitchlab-xxxx.local (or http://192.168.50.5)
+- **SSH**: `ssh pi@stitchlab-xxxx.local`, password `lab`
 
 Mainsail loads but reports **no MCU**. That is correct at this point and not a
 fault — step 3 fixes it.
@@ -45,7 +52,7 @@ The image carries the firmware, so this needs neither a second computer nor
 internet access:
 
 ```bash
-ssh pi@stitchlab.local
+ssh pi@stitchlab-xxxx.local
 stitchlab-flash-pico
 ```
 

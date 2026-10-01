@@ -1,5 +1,5 @@
 # Agent-Kontrakt -- siehe ~/Code/_std/AGENTS.base.md
-.PHONY: setup dev sim test test-intake test-pico test-wifi test-jogd lint check status help
+.PHONY: setup dev sim test test-intake test-pico test-wifi test-jogd test-image lint check status help
 .DEFAULT_GOAL := help
 
 # Meta-Repo fuer StitchLabOS: ein Raspberry-Pi-Image, das Klipper, Moonraker,
@@ -25,7 +25,7 @@ sim:     ## virtuellen Klipper-Drucker starten (Docker)
 INTAKE = stitchlabos/image/src/modules/stitchlab-intake
 PICO = stitchlabos/image/src/modules/pico-firmware
 
-test: test-intake test-pico test-wifi test-jogd  ## Tests: Intake, Pico-Werkzeuge, WLAN-Verwaltung, live_jogd, dann die Mainsail-Oberflaeche
+test: test-intake test-pico test-wifi test-jogd test-image  ## Tests: Intake, Pico-Werkzeuge, WLAN-Verwaltung, live_jogd, Image-Skripte, dann die Mainsail-Oberflaeche
 	cd mainsail && npm test
 
 test-intake:  ## Tests des G-Code-Intake (pytest in uv, Python wie auf dem Pi)
@@ -47,6 +47,10 @@ test-jogd:  ## Tests des live_jogd-Daemons (pytest in uv, ohne Dongle)
 	cd $(JOGD) && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 --with pytest --with pytest-asyncio \
 	  --with-requirements filesystem/home/pi/live_jogd/requirements.txt \
 	  pytest -q -p no:cacheprovider tests
+
+test-image:  ## Tests der Skripte des stitchlabos-Moduls (pytest in uv, ohne Pi)
+	cd stitchlabos/image/src/modules/stitchlabos && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 \
+	  --with pytest pytest -q -p no:cacheprovider tests
 
 lint:    ## Mainsail-Linter + tote Verweise in der Doku
 	cd mainsail && npm run lint
