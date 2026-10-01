@@ -150,6 +150,37 @@ if left:
 print(f"{DROPIN}: dropped {MODULE} from {sorted(lists)}")
 EOF
 
+# The base image's /boot/firmware/user-data is "#cloud-config" with comments
+# only. cloud-init rejects it as "empty cloud config", and every card written
+# without Imager customisation boots "degraded done" (2026-09-28 commissioning
+# run). Keep the comments and add one inert key; only while the file has no
+# content, so a base image that ships some turns this into a no-op. Imager
+# customisation and a hand-written user-data replace the file as before.
+USER_DATA=/boot/firmware/user-data
+if [ -f "$USER_DATA" ]; then
+    python3 - "$USER_DATA" <<'EOF_USERDATA'
+import sys
+import yaml
+
+path = sys.argv[1]
+with open(path) as f:
+    text = f.read()
+if yaml.safe_load(text):
+    print(f"{path} has content; nothing to do")
+    raise SystemExit(0)
+with open(path, "a") as f:
+    if not text.endswith("\n"):
+        f.write("\n")
+    f.write("\n# StitchLabOS: one key, so cloud-init does not reject this part as empty.\n")
+    f.write('final_message: "StitchLabOS: cloud-init finished after $UPTIME seconds"\n')
+with open(path) as f:
+    if not yaml.safe_load(f):
+        raise SystemExit(f"{path} is still empty")
+print(f"{path}: added final_message")
+EOF_USERDATA
+    cloud-init schema --config-file "$USER_DATA"
+fi
+
 # Enable UART for SKR Pico connection (GPIO14/15 ↔ Pico UART)
 # - enable_uart=1: activates the hardware UART on GPIO14/15
 # - disable-bt overlay: frees the PL011 UART from Bluetooth (gives it to GPIO pins)
