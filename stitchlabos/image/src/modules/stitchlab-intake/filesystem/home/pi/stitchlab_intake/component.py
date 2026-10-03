@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -342,11 +343,17 @@ class IntakeCore:
             except (OSError, ValueError):
                 pass  # rebuild
 
-        tmp_meta = meta_target.with_suffix(".json.tmp")
+        # Temp names are unique per run: prepare bypasses the queue, so it
+        # can analyse a just-uploaded file while the worker does too. With
+        # shared names the first run moved the PNG away and the second kept
+        # the CLI's absolute temp path in its report, which the page then
+        # requested (404, commissioning run of 2026-09-28).
+        run_id = uuid.uuid4().hex[:8]
+        tmp_meta = meta_target.with_suffix(f".{run_id}.json.tmp")
         # Preview path: we want the final filename keyed by preview_key,
         # but the CLI doesn't know the digest yet. Render to a tmp PNG,
         # parse the meta to discover preview_key, then rename.
-        tmp_thumb = thumb_root / f"{basename}.{analysis_digest}.tmp.png"
+        tmp_thumb = thumb_root / f"{basename}.{analysis_digest}.{run_id}.tmp.png"
 
         cli_args = [
             self.cfg.cli_path, "analyze", str(gcode_path),
@@ -371,32 +378,41 @@ class IntakeCore:
         elif hoop_id:
             cli_args += ["--hoop", hoop_id]
 
-        result = await self.adapter.run_cli(cli_args, timeout)
-        if result.returncode == 3:
-            raise RuntimeError(f"CLI failure: {result.stderr.strip()}")
-
         try:
-            report = json.loads(tmp_meta.read_text())
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(f"CLI produced no JSON: {exc}") from exc
+            result = await self.adapter.run_cli(cli_args, timeout)
+            if result.returncode == 3:
+                raise RuntimeError(f"CLI failure: {result.stderr.strip()}")
 
-        preview_key = report.get("preview_key")
-        if preview_key and tmp_thumb.is_file():
-            preview_digest = _digest(preview_key)
-            thumb_target = _thumb_path(self.cfg.gcodes_root, basename, preview_digest)
-            tmp_thumb.replace(thumb_target)
-            report["thumbnail"] = {
-                "relative_path": f"{THUMB_SUBDIR}/{thumb_target.name}",
-                "width": (report.get("thumbnail") or {}).get("width", self.cfg.thumbnail_size),
-                "height": (report.get("thumbnail") or {}).get("height", self.cfg.thumbnail_size),
-            }
-        elif tmp_thumb.is_file():
-            tmp_thumb.unlink()  # no preview_key — orphan, drop it
+            try:
+                report = json.loads(tmp_meta.read_text())
+            except (OSError, ValueError) as exc:
+                raise RuntimeError(f"CLI produced no JSON: {exc}") from exc
 
-        tmp_meta.replace(meta_target)
-        # Best-effort write-back with possibly updated thumbnail entry.
-        meta_target.write_text(json.dumps(report, indent=2, sort_keys=False))
-        return report
+            # The CLI's thumbnail entry names the temp file by its absolute path;
+            # never pass it on. Point at the final PNG, or drop the entry.
+            cli_thumb = report.pop("thumbnail", None) or {}
+            preview_key = report.get("preview_key")
+            thumb_target = (_thumb_path(self.cfg.gcodes_root, basename, _digest(preview_key))
+                            if preview_key else None)
+            if thumb_target is not None and tmp_thumb.is_file():
+                tmp_thumb.replace(thumb_target)
+            elif tmp_thumb.is_file():
+                tmp_thumb.unlink()  # no preview_key — orphan, drop it
+            if thumb_target is not None and thumb_target.is_file():
+                report["thumbnail"] = {
+                    "relative_path": f"{THUMB_SUBDIR}/{thumb_target.name}",
+                    "width": cli_thumb.get("width", self.cfg.thumbnail_size),
+                    "height": cli_thumb.get("height", self.cfg.thumbnail_size),
+                }
+
+            tmp_meta.replace(meta_target)
+            # Best-effort write-back with possibly updated thumbnail entry.
+            meta_target.write_text(json.dumps(report, indent=2, sort_keys=False))
+            return report
+        finally:
+            # Gone after a successful run; left over when the CLI failed.
+            tmp_meta.unlink(missing_ok=True)
+            tmp_thumb.unlink(missing_ok=True)
 
     # --- macros ----------------------------------------------------------
 

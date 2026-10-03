@@ -1,0 +1,90 @@
+#!/bin/bash
+# stitchlab-first-boot-name — give a fresh card its own name, once.
+#
+# Every card boots as hostname "stitchlab" with the fallback access point
+# "Stitchlab". Two machines in one room then collide: Avahi renames one of
+# them to stitchlab-2.local depending on boot order, and a user joining
+# "Stitchlab" reaches whichever answers. On the first boot this appends the
+# last four hex digits of the board's serial number to both, for example
+# stitchlab-3f2a and Stitchlab-3f2a. The suffix comes from the board, so
+# reflashing the same Pi gives the same name, and it can go on a label.
+#
+# A hostname set elsewhere (Imager customisation, cloud-init user-data, a
+# person) and an AP SSID changed in Mainsail are left alone.
+
+set -euo pipefail
+
+ROOT="${STITCHLAB_ROOT:-}"   # tests point this at a fake root
+DEFAULT_HOSTNAME="stitchlab"
+DEFAULT_SSID="Stitchlab"
+AP_KEYFILE="$ROOT/etc/NetworkManager/system-connections/AccessPopup.nmconnection"
+MARKER="$ROOT/var/lib/stitchlabos/first-boot-name.done"
+
+log() { echo "stitchlab-first-boot-name: $*"; }
+
+# Last four hex digits of the board serial, or of the machine ID on a board
+# without one.
+board_suffix() {
+    local serial=""
+    if [ -r "$ROOT/proc/device-tree/serial-number" ]; then
+        serial="$(tr -d '\0' < "$ROOT/proc/device-tree/serial-number")"
+    fi
+    if [ -z "$serial" ] && [ -r "$ROOT/etc/machine-id" ]; then
+        serial="$(cat "$ROOT/etc/machine-id")"
+    fi
+    serial="$(printf '%s' "$serial" | tr -cd '0-9a-fA-F' | tr 'A-F' 'a-f')"
+    [ "${#serial}" -ge 4 ] || return 1
+    printf '%s' "${serial:${#serial}-4}"
+}
+
+# Rewrite a file in place, keeping its owner and mode (the AP keyfile is 0600).
+rewrite() {
+    local file="$1" tmp
+    shift
+    tmp="$(mktemp)"
+    awk "$@" "$file" > "$tmp"
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+}
+
+rename_host() {
+    local new="$1" current
+    current="$(tr -d '[:space:]' < "$ROOT/etc/hostname" 2>/dev/null || true)"
+    if [ "$current" != "$DEFAULT_HOSTNAME" ]; then
+        log "hostname '$current' was set elsewhere; leaving it"
+        return
+    fi
+    printf '%s\n' "$new" > "$ROOT/etc/hostname"
+    if grep -qE '^127\.0\.1\.1[[:space:]]' "$ROOT/etc/hosts" 2>/dev/null; then
+        rewrite "$ROOT/etc/hosts" -v name="$new" \
+            '/^127\.0\.1\.1[ \t]/ { print "127.0.1.1\t" name; next } { print }'
+    else
+        printf '127.0.1.1\t%s\n' "$new" >> "$ROOT/etc/hosts"
+    fi
+    if [ -z "$ROOT" ]; then
+        hostname "$new"
+    fi
+    log "hostname set to $new"
+}
+
+rename_ap() {
+    local new="$1"
+    if [ ! -f "$AP_KEYFILE" ] || ! grep -qx "ssid=$DEFAULT_SSID" "$AP_KEYFILE"; then
+        log "access point SSID is not the default; leaving it"
+        return
+    fi
+    rewrite "$AP_KEYFILE" -v old="ssid=$DEFAULT_SSID" -v new="ssid=$new" \
+        '$0 == old { print new; next } { print }'
+    log "access point SSID set to $new"
+}
+
+if ! suffix="$(board_suffix)"; then
+    log "no board serial number or machine ID; keeping the default names"
+    exit 0
+fi
+
+rename_host "$DEFAULT_HOSTNAME-$suffix"
+rename_ap "$DEFAULT_SSID-$suffix"
+
+mkdir -p "$(dirname "$MARKER")"
+touch "$MARKER"

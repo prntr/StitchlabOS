@@ -20,12 +20,13 @@ Bridges StitchLabDongle (USB) to Moonraker (HTTP).
 
 Runtime model:
 - Installed on every image, but intentionally not enabled at boot.
-- Expected boot state is `static` + `inactive`.
-- The Mainsail Controller menu starts/stops it through Moonraker `machine.services.*`.
+- Plugging in the dongle starts it (udev `SYSTEMD_WANTS` in `99-stitchlab-dongle.rules`), also at boot with the dongle plugged in. Without a dongle the expected boot state is `static` + `inactive`.
+- The Mainsail Controller menu starts/stops it through Moonraker `machine.services.*`; opening the menu connects to a service that is already running. Stop holds until the next plug-in or boot.
 - Port `7150` only listens while the service is active.
+- Without `/dev/stitchlab-dongle` a start is skipped at once (`ConditionPathExists`): the unit stays `inactive`, never `failed`, however often it is clicked. There is no start limit; a crashing daemon restarts after 3 s, the delay growing to 5 minutes over five restarts.
 
 ```bash
-# Expected before the user clicks Connect Controller
+# Expected without a dongle (with one plugged in: active)
 systemctl is-enabled live_jogd       # static
 systemctl is-active live_jogd || true # inactive
 
@@ -96,7 +97,7 @@ journalctl -u AccessPopup.service -n 30
 curl http://localhost:7125/server/wifi/status
 ```
 
-The `wifi_manager.py` Moonraker component lives in `/home/pi/moonraker/moonraker/components/`. It uses `sudo -n nmcli` for all WiFi changes and, while `wlan0` runs the access point, `sudo -n /usr/sbin/iw dev wlan0 scan ap-force` for the network list (NetworkManager does not scan in AP mode). The image allows exactly these in `/etc/sudoers.d/020-stitchlab-wifi`; `sudo -n -l` as `pi` must list both. Images up to v0.1.0-beta.4 lack the file, so every WiFi change and the AP-mode scan fail there.
+The `wifi_manager.py` Moonraker component lives in `/home/pi/moonraker/moonraker/components/`. It uses `sudo -n nmcli` for all WiFi changes and, while `wlan0` runs the access point, `sudo -n /usr/sbin/iw dev wlan0 scan ap-force` for the network list (NetworkManager does not scan in AP mode). AP mode chosen in Mainsail stops `AccessPopup.timer` with `sudo -n /usr/bin/systemctl stop AccessPopup.timer`, so the timer does not switch back to a known network; leaving AP mode starts it again (`… start AccessPopup.timer`). The image allows exactly these in `/etc/sudoers.d/020-stitchlab-wifi`; `sudo -n -l` as `pi` must list all four. Images up to `20260927-814dd93` lack the two `systemctl` lines, so AP mode from Mainsail does not hold there. Images up to v0.1.0-beta.4 lack the file, so every WiFi change and the AP-mode scan fail there.
 
 ## SKR Pico (UART)
 

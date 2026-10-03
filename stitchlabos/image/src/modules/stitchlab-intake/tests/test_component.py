@@ -414,3 +414,45 @@ def test_changed_file_is_not_served_a_stale_analysis(tmp_path):
         assert second["bounds"]["width"] == 25.0
 
     _run(go())
+
+
+# --- thumbnails when two analyses of one file overlap ------------------------
+
+class RacingAdapter(FakeAdapter):
+    """After the CLI renders, its temp PNG is gone: what the second of two
+    overlapping analyses saw in the 2026-09-28 run, when the worker (after
+    the upload) and prepare (Save & Start) analysed one file at once."""
+
+    async def _run_cli(self, args: list, timeout: float) -> CliResult:
+        result = await super()._run_cli(args, timeout)
+        tmp_thumb = Path(args[args.index("--thumbnail-out") + 1])
+        tmp_thumb.unlink()
+        return result
+
+
+def _no_temp_paths(report: dict) -> None:
+    assert ".tmp" not in json.dumps(report)
+
+
+def test_overlapping_analysis_points_at_the_finished_thumbnail(tmp_path):
+    first = _make_core(tmp_path, FakeAdapter())
+    report = _run(first._run_analysis("design.gcode", hoop_id=None, timeout=30))
+    rel = report["thumbnail"]["relative_path"]
+    assert rel.startswith(f"{THUMB_SUBDIR}/") and not rel.startswith("/")
+
+    # Same file, same digests, but this run's temp PNG was taken by the other.
+    shutil.rmtree(first.cfg.gcodes_root / META_SUBDIR)
+    racing = IntakeCore(first.cfg, RacingAdapter().as_adapter())
+    report = _run(racing._run_analysis("design.gcode", hoop_id=None, timeout=30))
+    _no_temp_paths(report)
+    assert report["thumbnail"]["relative_path"] == rel
+
+
+def test_analysis_without_a_thumbnail_reports_none(tmp_path):
+    core = _make_core(tmp_path, RacingAdapter())
+    report = _run(core._run_analysis("design.gcode", hoop_id=None, timeout=30))
+    _no_temp_paths(report)
+    assert "thumbnail" not in report
+    leftovers = list((core.cfg.gcodes_root / THUMB_SUBDIR).glob("*.tmp*"))
+    leftovers += list((core.cfg.gcodes_root / META_SUBDIR).glob("*.tmp*"))
+    assert leftovers == []

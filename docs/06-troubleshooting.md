@@ -10,6 +10,7 @@
 | Wrong instance | `mainsail/public/config.json` |
 | Changes don't apply | Service worker cache - hard refresh or clear site data |
 | WS reconnects repeatedly in AP mode | Three-layer fix (brcmfmac + Moonraker ping + frontend keepalive) baked into Beta2 — see [AP runbook Issue 5](runbooks/ap-troubleshooting.md#issue-5-frontend-websocket-reconnects-in-ap-mode) |
+| Moonraker shows its own version as `?`, Update Manager lists repos as `v0.0.0-1` | Cosmetic. The image clones Klipper, Moonraker and the other repos shallow, so `git describe` finds no tag. `/etc/stitchlabos_version` names the image; Mainsail's host panel shows it as *StitchLabOS …* |
 
 ## Controller Menu / WebSocket
 
