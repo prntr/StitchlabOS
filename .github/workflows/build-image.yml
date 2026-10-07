@@ -63,7 +63,8 @@ jobs:
             else
               found="$(stitchlabos/scripts/ci/nearest-version-tag "$sub" "$url" "$pin")"
               if [ -n "$found" ]; then
-                echo "prntr/$sub $pin: nearest version tag ${found% *} commits back"
+                read -r found_tag _ found_distance <<< "$found"
+                echo "prntr/$sub $pin: nearest version tag $found_tag, $found_distance commits back"
               else
                 echo "::warning::prntr/$sub $pin has no version tag within 200 commits; the Update Manager will show v0.0.0 for it"
               fi
@@ -104,6 +105,9 @@ jobs:
             # the image clones with its last release tag.
             git clone --quiet --filter=blob:none "$repo" "$dir"
             git -C "$dir" checkout --quiet "$ref"
+            # Same abbreviation as the image's Klipper clone (klipper module):
+            # git picks its length from the object count, which differs.
+            git -C "$dir" config core.abbrev 12
             git -C "$dir" describe --tags --long --dirty --always
             cp "firmware/skr-pico/${seed}" "$dir/.config"
             make -C "$dir" olddefconfig

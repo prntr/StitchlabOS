@@ -34,6 +34,10 @@ chmod +x /usr/local/bin/stitchlab-clone-at-ref
 : "${KLIPPER_REF:?not set - CI passes the commit it built the Pico firmware from (build-image.yml)}"
 echo "Cloning Klipper at ${KLIPPER_REF}..."
 sudo -u pi /usr/local/bin/stitchlab-clone-at-ref "${KLIPPER_REPO}" "${KLIPPER_BRANCH}" "${KLIPPER_REF}" "${KLIPPER_DIR}"
+# Klipper's version string is `git describe`; a fixed abbreviation makes the
+# host's equal the firmware's (build-image.yml sets the same), so the two
+# klippy.log lines of docs/08-image-building.md match character for character.
+sudo -u pi git -C "${KLIPPER_DIR}" config core.abbrev 12
 
 # Clone Moonraker at the release's pin (stitchlabos/image/upstream-pins.conf), with its
 # last release tag so the Update Manager shows a real version.
