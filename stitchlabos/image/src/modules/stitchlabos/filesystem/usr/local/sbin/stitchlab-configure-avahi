@@ -1,0 +1,89 @@
+#!/bin/bash
+# stitchlab-configure-avahi — Avahi on wlan0, over IPv4 only.
+#
+# nginx (Mainsail, TurtleStitch) and Moonraker listen on IPv4 only. A
+# hotspot with an IPv6 uplink hands the Pi a global IPv6 address (workshop
+# 2026-10-06), and stock Avahi then announces it: browsers try the AAAA
+# record first, get "connection refused" on ports 80 and 7125, and fall
+# back to IPv4. So the name resolves to IPv4 only. use-ipv6=no alone is not
+# enough: Avahi still publishes the IPv6 address over IPv4
+# (publish-aaaa-on-ipv4 defaults to yes), checked with avahi 0.8-16.
+#
+# The build runs this inside the image (stitchlabos module); running it
+# again on a Pi is harmless. Every other line of the file stays as it is.
+
+set -euo pipefail
+
+CONF="${1:-${STITCHLAB_ROOT:-}/etc/avahi/avahi-daemon.conf}"
+
+if [ ! -f "$CONF" ]; then
+    echo "stitchlab-configure-avahi: $CONF not found" >&2
+    exit 1
+fi
+
+# section.key=value; the value replaces a set or commented-out key in its
+# section, or is added at the end of the section.
+SETTINGS="server.allow-interfaces=wlan0 server.use-ipv4=yes server.use-ipv6=no"
+SETTINGS="$SETTINGS publish.publish-aaaa-on-ipv4=no publish.publish-a-on-ipv6=no"
+SETTINGS="$SETTINGS reflector.enable-reflector=yes"
+
+tmp="$(mktemp "$CONF.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+
+awk -v settings="$SETTINGS" '
+BEGIN {
+    n = split(settings, lines, " ")
+    for (i = 1; i <= n; i++) {
+        eq = index(lines[i], "=")
+        dot = index(lines[i], ".")
+        key = substr(lines[i], dot + 1, eq - dot - 1)
+        section[key] = substr(lines[i], 1, dot - 1)
+        value[key] = substr(lines[i], eq + 1)
+        order[i] = key
+    }
+    nkeys = n
+}
+function flush(sec,    i, k) {
+    for (i = 1; i <= nkeys; i++) {
+        k = order[i]
+        if (section[k] == sec && !(k in done)) {
+            print k "=" value[k]
+            done[k] = 1
+        }
+    }
+}
+/^\[[^]]+\][[:space:]]*$/ {
+    flush(current)
+    current = $0
+    gsub(/^\[|\][[:space:]]*$/, "", current)
+    print
+    next
+}
+{
+    line = $0
+    sub(/^#/, "", line)
+    eq = index(line, "=")
+    k = eq ? substr(line, 1, eq - 1) : ""
+    if (k in value && section[k] == current && !(k in done)) {
+        print k "=" value[k]
+        done[k] = 1
+        next
+    }
+    print
+}
+END {
+    flush(current)
+    for (i = 1; i <= nkeys; i++) {
+        k = order[i]
+        if (!(k in done)) {
+            printf("stitchlab-configure-avahi: no [%s] section for %s\n", section[k], k) > "/dev/stderr"
+            exit 2
+        }
+    }
+}
+' "$CONF" > "$tmp"
+
+chmod --reference="$CONF" "$tmp" 2>/dev/null || chmod 0644 "$tmp"
+mv "$tmp" "$CONF"
+trap - EXIT
+echo "stitchlab-configure-avahi: $CONF on wlan0, IPv4 only"
