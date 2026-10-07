@@ -18,9 +18,12 @@ unpack /filesystem/home/pi /home/pi pi
 # chmod below fails and the whole image build aborts.
 unpack /filesystem/usr /usr root
 
-# Clone mainsail-config
-echo "Cloning mainsail-config..."
-sudo -u pi git clone https://github.com/mainsail-crew/mainsail-config.git ${MAINSAIL_CONFIG_DIR}
+# Clone mainsail-config at the release's pin: the machine's PAUSE and colour
+# change build on its macros, and the drift check runs this mainsail.cfg.
+: "${MAINSAIL_CONFIG_REF:?not set - CI passes MAINSAIL_CONFIG_REF from stitchlabos/image/upstream-pins.conf (build-image.yml)}"
+echo "Cloning mainsail-config at ${MAINSAIL_CONFIG_REF}..."
+sudo -u pi /usr/local/bin/stitchlab-clone-at-ref https://github.com/mainsail-crew/mainsail-config.git master \
+    "${MAINSAIL_CONFIG_REF}" ${MAINSAIL_CONFIG_DIR}
 
 # Link mainsail.cfg to printer_data/config
 ln -sf ${MAINSAIL_CONFIG_DIR}/mainsail.cfg /home/pi/printer_data/config/mainsail.cfg

@@ -48,9 +48,9 @@ test-jogd:  ## Tests des live_jogd-Daemons (pytest in uv, ohne Dongle)
 	  --with-requirements filesystem/home/pi/live_jogd/requirements.txt \
 	  pytest -q -p no:cacheprovider tests
 
-test-image:  ## Tests der Skripte des stitchlabos-Moduls (pytest in uv, ohne Pi)
-	cd stitchlabos/image/src/modules/stitchlabos && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 \
-	  --with pytest pytest -q -p no:cacheprovider tests
+test-image:  ## Tests der Image-Skripte (stitchlabos- und klipper-Modul; pytest in uv, ohne Pi, ohne Netz)
+	cd stitchlabos/image/src/modules && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 \
+	  --with pytest pytest -q -p no:cacheprovider stitchlabos/tests klipper/tests
 
 lint:    ## Mainsail-Linter + tote Verweise in der Doku
 	cd mainsail && npm run lint

@@ -11,6 +11,9 @@ export KLIPPER_REF="${KLIPPER_REF:-}"
 # Moonraker repository
 export MOONRAKER_REPO="https://github.com/Arksine/moonraker.git"
 export MOONRAKER_BRANCH="master"
+# Moonraker commit to install: MOONRAKER_REF in stitchlabos/image/upstream-pins.conf
+# (build-image.yml passes it). Klipper's commit comes from the same file.
+export MOONRAKER_REF="${MOONRAKER_REF:-}"
 
 # Installation paths
 export KLIPPER_DIR="/home/pi/klipper"

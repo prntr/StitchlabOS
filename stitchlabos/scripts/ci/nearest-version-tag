@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# nearest-version-tag GIT_DIR REMOTE_URL REF [MAX_DISTANCE]
+#
+# Print "TAG COMMIT DISTANCE" for the version tag on REMOTE_URL nearest to
+# REF that REF contains, judged in GIT_DIR's history (which must hold REF and
+# its ancestors), or nothing. A version tag is one Moonraker's update_manager
+# reads as a version: vX.Y.Z, optionally -alpha/-beta/-rc N. Only tags within
+# MAX_DISTANCE commits (default 200) count; an older one would make the image
+# clone carry that much history.
+#
+# Same tag rules as stitchlab-clone-at-ref (klipper image module), which
+# applies them inside the image build; keep the two in step.
+set -euo pipefail
+
+if [ "$#" -lt 3 ]; then
+    echo "usage: $(basename "$0") GIT_DIR REMOTE_URL REF [MAX_DISTANCE]" >&2
+    exit 2
+fi
+git_dir=$1 url=$2 ref=$3 max=${4:-200}
+
+best="" best_commit="" best_n=""
+while read -r commit tag; do
+    [ -n "$commit" ] || continue
+    git -C "$git_dir" merge-base --is-ancestor "$commit" "$ref" 2>/dev/null || continue
+    n=$(git -C "$git_dir" rev-list --count "$commit..$ref")
+    [ "$n" -le "$max" ] || continue
+    if [ -z "$best_n" ] || [ "$n" -lt "$best_n" ]; then
+        best=$tag best_commit=$commit best_n=$n
+    fi
+done < <(
+    git ls-remote --tags "$url" | awk '
+        { name = $2; sub("^refs/tags/", "", name) }
+        name ~ /\^\{\}$/ { sub(/\^\{\}$/, "", name); peeled[name] = $1; next }
+        { plain[name] = $1 }
+        END { for (t in plain) print ((t in peeled) ? peeled[t] : plain[t]), t }' |
+        grep -E ' v?[0-9]+(\.[0-9]+)*([-_.]?(a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?$' || true
+)
+
+if [ -n "$best" ]; then
+    echo "$best $best_commit $best_n"
+fi
