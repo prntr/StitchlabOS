@@ -143,8 +143,9 @@ def test_feedrate_missing_only_warns_once(tmp_path):
     p = tmp_path / "no_feed.gcode"
     p.write_text("G21\nG90\nG1 X1 Y1\nG1 X2 Y2\nG1 X3 Y3\n")
     r = parse_file(str(p))
-    feed_warnings = [d for d in r.diagnostics if d.code == "FEEDRATE_MISSING"]
-    assert len(feed_warnings) == 1
+    feed_notes = [d for d in r.diagnostics if d.code == "FEEDRATE_MISSING"]
+    assert len(feed_notes) == 1
+    assert feed_notes[0].severity == "info"     # the machine's job start sets F
 
 
 def test_decimal_comma_normalised(tmp_path):

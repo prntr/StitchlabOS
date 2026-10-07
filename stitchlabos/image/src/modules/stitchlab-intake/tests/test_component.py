@@ -482,8 +482,8 @@ def test_prepare_rewrites_paren_comments_before_hashing(tmp_path):
         assert "G90 ; use absolute coordinates" in after
         # The key describes the rewritten file, the bytes Klipper reads.
         assert r1["source"]["sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
-        assert r1["state"] == "warnings"
-        assert [d["code"] for d in r1["errors"]] == []
+        assert r1["state"] == "valid"
+        assert r1["errors"] == [] and r1["warnings"] == []
         assert any(d["code"] == "PAREN_COMMENTS_NORMALISED" for d in r1["info"])
         calls = fa.cli_calls
         r2 = await core.prepare("ink.gcode")

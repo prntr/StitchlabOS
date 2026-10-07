@@ -22,7 +22,14 @@ from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Optional
 
 from . import limits
-from .stitch_model import StitchSequence, is_needle_up, macro_stitches, stitches_between
+from .stitch_model import (
+    Z_EPSILON_MM,
+    StitchSequence,
+    is_needle_up,
+    is_one_turn,
+    is_stitch_step,
+    macro_stitches,
+)
 
 
 # --- Public data types ---------------------------------------------------
@@ -699,9 +706,6 @@ def _compute_new_z(state: ModalState, params: dict) -> Optional[float]:
 
 compute_new_z = _compute_new_z
 
-# Float noise in exported coordinates; a real Z step is never this small.
-_Z_EPSILON_MM = 1e-3
-
 
 def _update_move(state: ModalState, params: dict, result: AnalysisResult,
                  ctx: "_ParseContext", line_no: int) -> None:
@@ -722,9 +726,12 @@ def _update_move(state: ModalState, params: dict, result: AnalysisResult,
         state.feedrate = feed
 
     if state.feedrate is None and not ctx.feedrate_missing_warned:
+        # Info, not a warning: the machine sets a defined F when a job
+        # starts (beta6 contract, embroidery_macros.cfg _STITCH_JOB_START),
+        # and neither Ink/Stitch nor TurtleStitch writes one.
         result.diagnostics.append(Diagnostic(
-            "warning", "FEEDRATE_MISSING",
-            "First move has no feedrate; Klipper will reuse previous global F",
+            "info", "FEEDRATE_MISSING",
+            "No feedrate before the first move; the machine's job start sets it",
             line_no=line_no,
         ))
         ctx.feedrate_missing_warned = True
@@ -734,7 +741,7 @@ def _update_move(state: ModalState, params: dict, result: AnalysisResult,
     # A job starts with the needle up at logical Z 0: Ink/Stitch and
     # TurtleStitch both write absolute Z counted up from 0.
     cur_z = state.z if state.z is not None else 0.0
-    z_changes = new_z is not None and abs(new_z - cur_z) > _Z_EPSILON_MM
+    z_changes = new_z is not None and abs(new_z - cur_z) > Z_EPSILON_MM
 
     if new_xy is not None:
         if z_changes:
@@ -758,7 +765,7 @@ def _update_move(state: ModalState, params: dict, result: AnalysisResult,
         state.x, state.y = new_xy
 
     if new_z is not None:
-        if new_z < cur_z - _Z_EPSILON_MM:
+        if new_z < cur_z - Z_EPSILON_MM:
             result.diagnostics.append(Diagnostic(
                 "error", "Z_REVERSE",
                 f"Z goes back from {cur_z:.2f} to {new_z:.2f}: the handwheel "
@@ -766,4 +773,16 @@ def _update_move(state: ModalState, params: dict, result: AnalysisResult,
                 line_no=line_no,
             ))
         state.z = new_z
-        _record_stitches(stitches_between(cur_z, new_z), state, result, ctx, line_no)
+        if new_xy is not None:
+            if z_changes:
+                # A stitch point, as the preview draws it; not counted.
+                _settle(ctx.sequence.stitch(), result)
+        elif is_stitch_step(cur_z, new_z):
+            if not is_one_turn(cur_z, new_z):
+                result.diagnostics.append(Diagnostic(
+                    "warning", "Z_STEP_NOT_ONE_STITCH",
+                    f"Z step of {new_z - cur_z:+.2f} mm counted as one stitch; "
+                    f"one stitch is +{limits.NEEDLE_PERIOD_MM:g} mm",
+                    line_no=line_no,
+                ))
+            _record_stitches(1, state, result, ctx, line_no)

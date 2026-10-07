@@ -39,7 +39,8 @@ ALLOWED_M_COMMANDS = frozenset({
 END_COMMANDS = frozenset({"M2", "M30"})            # end of job: needle up
 COLOR_CHANGE_COMMANDS = frozenset({
     "M0", "M00",                                   # Ink/Stitch writes M00
-    "COLOR_CHANGE", "STOP_FOR_COLOR_CHANGE",
+    "M600",                                        # filament/thread change
+    "COLOR_CHANGE", "STOP_FOR_COLOR_CHANGE",       # TurtleStitch: COLOR_CHANGE
 })
 
 # --- Blocked commands (hard errors) --------------------------------------

@@ -32,7 +32,7 @@ from .parser import (
     split_line,
     to_mm,
 )
-from .stitch_model import StitchSequence, macro_stitches, stitches_between
+from .stitch_model import StitchSequence, is_stitch_step, macro_stitches
 from .checks import HoopSpec
 from .frame_geometry import load_frame_geometry
 
@@ -180,7 +180,8 @@ def _iter_render_moves(path: str) -> Iterator[_MoveEvent]:
             if new_z is not None:
                 cur_z = state.z if state.z is not None else 0.0
                 state.z = new_z
-                if stitches_between(cur_z, new_z):
+                # A Z step up is a stitch point, also inside an X/Y move.
+                if is_stitch_step(cur_z, new_z):
                     settled = event(sequence.stitch())
                     if settled is not None:
                         yield settled

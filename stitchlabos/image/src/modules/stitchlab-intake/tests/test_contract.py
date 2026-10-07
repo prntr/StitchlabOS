@@ -66,8 +66,28 @@ def test_both_producers_agree_on_one_model(tmp_path):
 
 
 def test_relative_z_steps_count_too(tmp_path):
-    r = parse_text(tmp_path, "G21\nG90\nG1 X1 Y1 F600\nG91\nG1 Z5\nG90\nG1 X2 Y2\nG91\nG1 Z10\nG90\n")
-    assert r.stats.stitch_count == 3           # +5 and +10
+    r = parse_text(tmp_path, "G21\nG90\nG1 X1 Y1 F600\nG91\nG1 Z5\nG90\nG1 X2 Y2\nG91\nG1 Z5\nG90\n")
+    assert r.stats.stitch_count == 2
+    assert r.status == "valid", [d.as_dict() for d in r.diagnostics]
+
+
+def test_one_stitch_per_z_only_line_as_the_preview_counts(tmp_path):
+    # Mainsail's preview counts Z-only lines; a step other than +5 still
+    # counts once, with a warning.
+    r = parse_text(tmp_path, "G21\nG90\nG1 X1 Y1 F600\nG1 Z10\nG1 X2 Y2\nG1 Z15\n")
+    assert r.stats.stitch_count == 2
+    assert [d.line_no for d in r.diagnostics if d.code == "Z_STEP_NOT_ONE_STITCH"] == [4]
+
+
+def test_turtlestitch_beta6_export_is_valid():
+    # Package C's export: '; color' + COLOR_CHANGE, a lone penetration at the
+    # start and after jumps and colour changes, M400 at the end, no F.
+    r = parse_file(fx("turtlestitch_beta6.gcode"))
+    assert r.status == "valid", [d.as_dict() for d in r.diagnostics]
+    assert r.stats.stitch_count == 8           # "; Stitches: 8"
+    assert r.stats.color_changes == 1
+    assert r.stats.jump_count == 0             # every move ends in a penetration
+    assert "FEEDRATE_MISSING" in by_severity(r, "info")
 
 
 def test_stitch_macros_count(tmp_path):
@@ -88,19 +108,20 @@ def test_alternate_z_from_inkstitch_defaults_is_blocked(tmp_path):
     # a turn, the frame moves with it part-way down, and Z runs backwards.
     r = parse_text(tmp_path, "G90\nG21\nG0 X1 Y1\nG0 Z1\nG0 X2 Y1\nG0 Z0\nG0 X3 Y1\nG0 Z1\n")
     assert {"XY_MOVE_NEEDLE_NOT_UP", "Z_REVERSE"} <= by_severity(r, "error")
-    assert r.stats.stitch_count == 0
+    assert "Z_STEP_NOT_ONE_STITCH" in by_severity(r, "warning")
     assert r.status == "blocked"
 
 
-def test_xy_and_z_in_one_move_is_blocked(tmp_path):
+def test_xy_and_z_in_one_move_is_blocked_and_not_counted(tmp_path):
     r = parse_text(tmp_path, "G21\nG90\nG1 X0 Y0 F600\nG1 X5 Y0 Z5\n")
     assert "XY_AND_Z_IN_ONE_MOVE" in by_severity(r, "error")
+    assert r.stats.stitch_count == 0           # drawn as a stitch point, not counted
 
 
 def test_needle_down_between_moves_is_blocked(tmp_path):
     r = parse_text(tmp_path, "G21\nG90\nG1 X0 Y0 F600\nG1 Z2.5\nG1 X5 Y0\nG1 Z5\n")
     assert "XY_MOVE_NEEDLE_NOT_UP" in by_severity(r, "error")
-    assert r.stats.stitch_count == 1
+    assert r.stats.stitch_count == 2           # two Z-only lines, as in the preview
 
 
 # --- comments -------------------------------------------------------------
@@ -122,8 +143,7 @@ def test_normalised_inkstitch_file_runs_and_keeps_its_lines(tmp_path):
     assert not codes(r) & {"PAREN_COMMENT_WITH_COMMAND", "PAREN_COMMENT_LINE"}
     assert r.units_explicit                    # G21 is seen
     assert r.stats.stitch_count == 7
-    assert r.status == "warnings"              # only FEEDRATE_MISSING is left
-    assert by_severity(r, "warning") == {"FEEDRATE_MISSING"}
+    assert r.status == "valid", [d.as_dict() for d in r.diagnostics]
 
 
 @pytest.mark.parametrize("line, expected", [
@@ -148,7 +168,7 @@ def test_paren_inside_quotes_is_not_a_comment(tmp_path):
 
 # --- command tables -------------------------------------------------------
 
-@pytest.mark.parametrize("command", ["M0", "M00", "COLOR_CHANGE"])
+@pytest.mark.parametrize("command", ["M0", "M00", "M600", "COLOR_CHANGE"])
 def test_colour_change_commands_are_known(tmp_path, command):
     r = parse_text(tmp_path, f"G21\nG90\nG1 X1 Y1 F600\nG1 Z5\n{command}\nG1 X2 Y2\nG1 Z10\n")
     assert r.stats.color_changes == 1

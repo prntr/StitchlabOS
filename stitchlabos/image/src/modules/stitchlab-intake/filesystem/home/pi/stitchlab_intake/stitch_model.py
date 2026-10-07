@@ -7,7 +7,6 @@ needle up at multiples of 5 (``embroidery_macros.cfg``).
 
 from __future__ import annotations
 
-import math
 import re
 from typing import Optional
 
@@ -16,16 +15,17 @@ from . import limits
 
 # --- Needle model --------------------------------------------------------
 #
-# One stitch is one handwheel turn: Z passes the next needle-up position
-# (a multiple of NEEDLE_PERIOD_MM). Ink/Stitch writes `G0 X Y` then
-# `G0 Z+5`; TurtleStitch `G1 X Y` then `G1 Z+5`. G0 versus G1 says nothing
-# about stitches. The Mainsail preview (parseEmbroideryGcode.ts) uses the
-# same model: Z-only moves are stitch points.
+# One stitch is one Z-only move up, a Z step of +NEEDLE_PERIOD_MM (one
+# handwheel turn). Ink/Stitch writes `G0 X Y` then `G0 Z+5`; TurtleStitch
+# `G1 X Y` then `G1 Z+5`. G0 versus G1 says nothing about stitches. The
+# Mainsail preview (parseEmbroideryGcode.ts, beta6) counts the same way:
+# one stitch per Z-only line; a combined X/Y/Z move is drawn as a stitch
+# point but not counted (the intake blocks it).
 
-
-def needle_up_index(z: float) -> int:
-    """Number of needle-up positions at or below ``z`` (tolerance included)."""
-    return math.floor((z + limits.NEEDLE_UP_TOLERANCE_MM) / limits.NEEDLE_PERIOD_MM)
+# Float noise in exported coordinates; a real Z step is never this small.
+Z_EPSILON_MM = 1e-3
+# How far a Z step may differ from one turn before the intake says so.
+Z_STEP_TOLERANCE_MM = 0.01
 
 
 def is_needle_up(z: float) -> bool:
@@ -33,9 +33,14 @@ def is_needle_up(z: float) -> bool:
     return abs(z - period * round(z / period)) <= limits.NEEDLE_UP_TOLERANCE_MM
 
 
-def stitches_between(z_from: float, z_to: float) -> int:
-    """Complete stitches made by turning the handwheel from ``z_from`` to ``z_to``."""
-    return max(0, needle_up_index(z_to) - needle_up_index(z_from))
+def is_stitch_step(z_from: float, z_to: float) -> bool:
+    """Whether a move from ``z_from`` to ``z_to`` turns the needle forward."""
+    return z_to > z_from + Z_EPSILON_MM
+
+
+def is_one_turn(z_from: float, z_to: float) -> bool:
+    """Whether a Z step is exactly one stitch (+NEEDLE_PERIOD_MM)."""
+    return abs((z_to - z_from) - limits.NEEDLE_PERIOD_MM) <= Z_STEP_TOLERANCE_MM
 
 
 _COUNT_PARAM_RE = re.compile(r"\bCOUNT\s*=\s*(\d+)", re.IGNORECASE)
