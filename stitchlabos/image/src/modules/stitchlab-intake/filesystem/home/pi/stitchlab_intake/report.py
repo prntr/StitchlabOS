@@ -65,7 +65,8 @@ def build_preview_key(analysis_key: str,
 def result_to_dict(result: AnalysisResult,
                    placement: Optional[dict] = None,
                    thumbnail: Optional[dict] = None,
-                   preview_key: Optional[str] = None) -> dict:
+                   preview_key: Optional[str] = None,
+                   machine_limits: Optional[dict] = None) -> dict:
     diagnostics = [d.as_dict() for d in result.diagnostics]
     errors = [d for d in diagnostics if d["severity"] == "error"]
     warnings = [d for d in diagnostics if d["severity"] == "warning"]
@@ -90,6 +91,7 @@ def result_to_dict(result: AnalysisResult,
         "stitchlab_meta": result.stitchlab_meta,
         "referenced_unknown_macros": sorted(result.referenced_unknown_macros),
         "placement": placement,
+        "machine_limits": machine_limits,
         "thumbnail": thumbnail,
         "errors": errors,
         "warnings": warnings,

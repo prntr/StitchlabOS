@@ -103,9 +103,9 @@ def test_dedup_skips_repeated_pixel_pairs(tmp_path):
     """Two identical G1 sequences should draw the same number of pixels as one."""
     a_path = tmp_path / "once.gcode"
     b_path = tmp_path / "twice.gcode"
-    once = "G21\nG90\nG1 X0 Y0 F1500\nG1 X20 Y0\n"
+    once = "G21\nG90\nG1 X0 Y0 F1500\nG1 Z5\nG1 X20 Y0\nG1 Z10\n"
     a_path.write_text(once)
-    b_path.write_text(once + "G1 X0 Y0\nG1 X20 Y0\n")
+    b_path.write_text(once + "G1 X0 Y0\nG1 Z15\nG1 X20 Y0\nG1 Z20\n")
     ra = parse_file(str(a_path))
     rb = parse_file(str(b_path))
     out_a = tmp_path / "a.png"
@@ -151,10 +151,10 @@ def test_color_comment_changes_stitch_color(tmp_path):
     p = tmp_path / "colored.gcode"
     p.write_text(
         "G21\nG90\n"
-        "G1 X0 Y0 F1500\n"
+        "G1 X0 Y0 F1500\nG1 Z5\n"
         "; STITCHLAB_COLOR: r=230 g=10 b=10 name=red\n"
-        "G1 X20 Y0\n"
-        "G1 X20 Y20\n"
+        "G1 X20 Y0\nG1 Z10\n"
+        "G1 X20 Y20\nG1 Z15\n"
     )
     r = parse_file(str(p))
     out = tmp_path / "thumb.png"
@@ -172,3 +172,13 @@ def test_color_comment_changes_stitch_color(tmp_path):
             if found_red:
                 break
         assert found_red
+
+
+def test_inkstitch_file_draws_its_stitches(tmp_path):
+    """Ink/Stitch writes only G0; its Z steps make those moves stitches."""
+    r = parse_file(fx("inkstitch_v3.gcode"))
+    out = tmp_path / "thumb.png"
+    renderer.render_thumbnail(fx("inkstitch_v3.gcode"), r, str(out))
+    # Jumps are hidden by default, so every drawn pixel is a stitch.
+    with Image.open(out) as img:
+        assert _count_non_transparent(img) > 0

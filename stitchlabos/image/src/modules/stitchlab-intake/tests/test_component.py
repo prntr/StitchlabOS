@@ -8,6 +8,7 @@ That keeps these tests honest about what Moonraker would observe.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -42,6 +43,8 @@ class FakeAdapter:
         self.macros: Optional[set] = set()  # set() == klippy ready, empty config
         self.cli_calls: int = 0
         self.cli_gate: Optional[asyncio.Event] = None  # if set, run_cli waits
+        # Klipper's configfile.settings; None = an older wrapper without the hook.
+        self.settings: Optional[dict] = None
 
     def as_adapter(self) -> Adapter:
         return Adapter(
@@ -49,7 +52,11 @@ class FakeAdapter:
             query_klippy_macros=self._query_macros,
             is_printing=lambda: False,
             emit_event=self._emit,
+            query_klippy_settings=self._query_settings if self.settings is not None else None,
         )
+
+    async def _query_settings(self) -> Optional[dict]:
+        return self.settings
 
     async def _run_cli(self, args: list, timeout: float) -> CliResult:
         self.cli_calls += 1
@@ -456,3 +463,107 @@ def test_analysis_without_a_thumbnail_reports_none(tmp_path):
     leftovers = list((core.cfg.gcodes_root / THUMB_SUBDIR).glob("*.tmp*"))
     leftovers += list((core.cfg.gcodes_root / META_SUBDIR).glob("*.tmp*"))
     assert leftovers == []
+
+
+# --- beta6: comments Klipper can run, machine travel -------------------------
+
+def test_prepare_rewrites_paren_comments_before_hashing(tmp_path):
+    fa = FakeAdapter()
+    core = _make_core(tmp_path, fa)
+    target = core.cfg.gcodes_root / "ink.gcode"
+    shutil.copy(FIXTURES / "inkstitch_v3.gcode", target)
+    before = target.read_text().split("\n")
+
+    async def go():
+        r1 = await core.prepare("ink.gcode")
+        after = target.read_text().split("\n")
+        assert len(after) == len(before)
+        assert "(" not in target.read_text()
+        assert "G90 ; use absolute coordinates" in after
+        # The key describes the rewritten file, the bytes Klipper reads.
+        assert r1["source"]["sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
+        assert r1["state"] == "warnings"
+        assert [d["code"] for d in r1["errors"]] == []
+        assert any(d["code"] == "PAREN_COMMENTS_NORMALISED" for d in r1["info"])
+        calls = fa.cli_calls
+        r2 = await core.prepare("ink.gcode")
+        assert r2["analysis_key"] == r1["analysis_key"]
+        assert fa.cli_calls == calls
+
+    _run(go())
+
+
+def test_rewrite_keeps_bom_and_crlf(tmp_path):
+    fa = FakeAdapter()
+    core = _make_core(tmp_path, fa)
+    target = core.cfg.gcodes_root / "crlf.gcode"
+    target.write_bytes(b"\xef\xbb\xbfG90 (abs)\r\nG21\r\nG1 X1 Y1 F600\r\nG1 Z5\r\n")
+
+    async def go():
+        await core.prepare("crlf.gcode")
+        assert target.read_bytes() == (
+            b"\xef\xbb\xbfG90 ; abs\r\nG21\r\nG1 X1 Y1 F600\r\nG1 Z5\r\n")
+
+    _run(go())
+
+
+def test_unterminated_paren_file_is_left_untouched_and_blocked(tmp_path):
+    fa = FakeAdapter()
+    core = _make_core(tmp_path, fa)
+    target = core.cfg.gcodes_root / "open.gcode"
+    shutil.copy(FIXTURES / "unterminated_paren.gcode", target)
+    original = target.read_bytes()
+
+    async def go():
+        report = await core.prepare("open.gcode")
+        assert target.read_bytes() == original
+        assert report["state"] == "blocked"
+        assert "UNTERMINATED_PAREN" in [d["code"] for d in report["errors"]]
+
+    _run(go())
+
+
+TALL = "G21\nG90\nG1 X10 Y10 F600\nG1 Z5\nG1 X10 Y40\nG1 Z10\nG1 X10 Y70\nG1 Z15\n" \
+       "G1 X10 Y100\nG1 Z20\nG1 X10 Y124.6\nG1 Z25\n"
+
+
+def _settings(y_max: float) -> dict:
+    return {"stepper_x": {"position_min": 0.0, "position_max": 90.0},
+            "stepper_y": {"position_min": 0.0, "position_max": y_max}}
+
+
+def test_machine_travel_from_klipper_blocks_and_rechecks_when_config_changes(tmp_path):
+    fa = FakeAdapter()
+    fa.settings = _settings(120.0)            # the image's printer.cfg
+    core = _make_core(tmp_path, fa)
+    (core.cfg.gcodes_root / "tall.gcode").write_text(TALL)
+
+    async def go():
+        r1 = await core.prepare("tall.gcode")
+        assert r1["state"] == "blocked"
+        assert [d["code"] for d in r1["errors"]] == ["DESIGN_OUTSIDE_MACHINE"]
+        assert r1["machine_limits"] == {"x": [0.0, 90.0], "y": [0.0, 120.0]}
+        calls = fa.cli_calls
+        fa.settings = _settings(130.0)        # hybrid printer.cfg: re-check
+        r2 = await core.prepare("tall.gcode")
+        assert fa.cli_calls == calls + 1
+        assert r2["errors"] == []
+        fa.settings = {}                      # Klippy not ready: keep the last verdict
+        r3 = await core.prepare("tall.gcode")
+        assert fa.cli_calls == calls + 1
+        assert r3["analysis_key"] == r2["analysis_key"]
+
+    _run(go())
+
+
+def test_wrapper_without_settings_hook_checks_the_hoop_only(tmp_path):
+    fa = FakeAdapter()                        # settings None: hook absent
+    core = _make_core(tmp_path, fa)
+    (core.cfg.gcodes_root / "tall.gcode").write_text(TALL)
+
+    async def go():
+        report = await core.prepare("tall.gcode")
+        assert report["machine_limits"] is None
+        assert report["errors"] == []
+
+    _run(go())

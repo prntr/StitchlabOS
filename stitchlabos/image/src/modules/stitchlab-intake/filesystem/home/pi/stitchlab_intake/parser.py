@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Optional
 
 from . import limits
+from .stitch_model import StitchSequence, is_needle_up, macro_stitches, stitches_between
 
 
 # --- Public data types ---------------------------------------------------
@@ -152,6 +153,11 @@ class ModalState:
 #
 # Both `;...` (rest of line) and inline `(...)` are recognised. Multi-line
 # parens are flagged as unterminated and treated as ending at EOL.
+#
+# Klipper itself knows only `;`, and cuts there even inside quotes. It has
+# no `(...)` comments at all, so `G90 (abs)` reaches it as the unknown
+# command "G90 (" and never runs. A `(` inside double quotes is a literal
+# (`RESPOND MSG="a (b)"` works in Klipper), so it opens no comment here.
 
 _COMMENT_TOKEN_PAREN = "("
 _COMMENT_TOKEN_LINE = ";"
@@ -164,13 +170,19 @@ def _split_line(raw: str) -> tuple[str, str, list[str], bool]:
     i = 0
     n = len(raw)
     paren_depth = 0
+    in_quote = False
     paren_buf: list[str] = []
     while i < n:
         ch = raw[i]
         if paren_depth == 0 and ch == _COMMENT_TOKEN_LINE:
             line_comment = raw[i + 1:].rstrip()
             break
-        if ch == _COMMENT_TOKEN_PAREN:
+        if paren_depth == 0 and ch == '"':
+            in_quote = not in_quote
+            out_parts.append(ch)
+        elif in_quote:
+            out_parts.append(ch)
+        elif ch == _COMMENT_TOKEN_PAREN:
             paren_depth += 1
             paren_buf = []
         elif ch == ")" and paren_depth > 0:
@@ -186,6 +198,28 @@ def _split_line(raw: str) -> tuple[str, str, list[str], bool]:
     if unterminated and paren_buf:
         paren_parts.append("".join(paren_buf))
     return ("".join(out_parts).strip(), line_comment.strip(), paren_parts, unterminated)
+
+
+def normalise_paren_comments(raw: str) -> Optional[str]:
+    """Rewrite a line's ``(...)`` comments as one trailing ``;`` comment.
+
+    ``G90 (use absolute coordinates)`` becomes
+    ``G90 ; use absolute coordinates``, which Klipper runs. Comments move
+    behind the command so no parameter ends up inside a ``;`` comment.
+    Returns ``None`` when the line has no paren comment, or an unterminated
+    one: whether that swallows the following lines is ambiguous, so such a
+    file stays as it is and UNTERMINATED_PAREN blocks it.
+    """
+    command, line_comment, parens, unterminated = _split_line(raw)
+    if unterminated or not parens:
+        return None
+    comments = [c.strip() for c in parens if c.strip()]
+    if line_comment:
+        comments.append(line_comment)
+    if not comments:
+        return command
+    tail = "; " + " ; ".join(comments)
+    return f"{command} {tail}" if command else tail
 
 
 # Token like `X12.5`, `Y-3`, `F1500`, `E0.4`.
@@ -361,6 +395,19 @@ def _consume(lines: Iterable[tuple[int, str]], result: AnalysisResult) -> None:
                 "Comment opened with '(' but never closed on the same line",
                 line_no=line_no,
             ))
+        elif paren_comments and command_text:
+            result.diagnostics.append(Diagnostic(
+                "error", "PAREN_COMMENT_WITH_COMMAND",
+                "Klipper has no '(...)' comments: the command on this line "
+                "would not run or would fail. Use ';' comments",
+                line_no=line_no,
+            ))
+        elif paren_comments:
+            result.diagnostics.append(Diagnostic(
+                "info", "PAREN_COMMENT_LINE",
+                "Klipper reports '(...)' comment lines as unknown commands",
+                line_no=line_no,
+            ))
 
         for comment in (line_comment, *paren_comments):
             if not comment:
@@ -377,7 +424,16 @@ def _consume(lines: Iterable[tuple[int, str]], result: AnalysisResult) -> None:
         if head is None:
             continue
         result.stats.command_count += 1
-        _apply_command(head, params, state, result, ctx, line_no)
+        _apply_command(head, params, command_text, state, result, ctx, line_no)
+
+    _settle(ctx.sequence.finish(), result)
+
+    if result.bounds.is_valid and result.stats.stitch_count == 0:
+        result.diagnostics.append(Diagnostic(
+            "warning", "NO_STITCHES",
+            "The file moves the frame but never turns the needle: a stitch "
+            f"is a Z step of +{limits.NEEDLE_PERIOD_MM:g} mm (or STITCH)",
+        ))
 
     if not state.units_explicit:
         result.diagnostics.append(Diagnostic(
@@ -402,8 +458,41 @@ def _consume(lines: Iterable[tuple[int, str]], result: AnalysisResult) -> None:
 
 @dataclass
 class _ParseContext:
-    """Per-file scratch state for one-shot diagnostics."""
+    """Per-file scratch state: one-shot diagnostics and the stitch model."""
     feedrate_missing_warned: bool = False
+    sequence: StitchSequence = field(default_factory=StitchSequence)
+    # XY where the needle last went through the fabric; None before the first.
+    last_stitch_xy: Optional[tuple[float, float]] = None
+    end_line_no: Optional[int] = None      # line of the first M30/M2
+    after_end_warned: bool = False
+
+
+def _settle(settled: Optional[tuple[str, object]], result: AnalysisResult) -> None:
+    if settled is not None and settled[0] == "travel":
+        result.stats.jump_count += 1
+
+
+def _record_stitches(count: int, state: ModalState, result: AnalysisResult,
+                     ctx: _ParseContext, line_no: int) -> None:
+    """Book ``count`` needle cycles at the current XY position."""
+    if count <= 0:
+        return
+    result.stats.stitch_count += count
+    _settle(ctx.sequence.stitch(), result)
+    if state.x is None or state.y is None:
+        return
+    here = (state.x, state.y)
+    if ctx.last_stitch_xy is not None:
+        thread = math.hypot(here[0] - ctx.last_stitch_xy[0], here[1] - ctx.last_stitch_xy[1])
+        if thread > limits.LONG_JUMP_MM:
+            result.stats.long_jump_count += 1
+            result.diagnostics.append(Diagnostic(
+                "warning", "LONG_JUMP",
+                f"{thread:.1f} mm of thread between two stitches (over "
+                f"{limits.LONG_JUMP_MM:g} mm); consider a trim",
+                line_no=line_no,
+            ))
+    ctx.last_stitch_xy = here
 
 
 # --- STITCHLAB_* metadata absorption -------------------------------------
@@ -430,9 +519,21 @@ def _absorb_stitchlab_meta(comment: str, result: AnalysisResult, line_no: int) -
 # --- Command application -------------------------------------------------
 
 
-def _apply_command(head: str, params: dict, state: ModalState,
-                   result: AnalysisResult, ctx: "_ParseContext",
-                   line_no: int) -> None:
+def _apply_command(head: str, params: dict, command_text: str,
+                   state: ModalState, result: AnalysisResult,
+                   ctx: "_ParseContext", line_no: int) -> None:
+    # Klipper does not stop at M30/M2: everything after it still runs.
+    if ctx.end_line_no is not None and not ctx.after_end_warned:
+        ctx.after_end_warned = True
+        result.diagnostics.append(Diagnostic(
+            "warning", "COMMANDS_AFTER_END",
+            f"Commands after the end of job (M30/M2, line {ctx.end_line_no}) "
+            "still run: Klipper does not stop there",
+            line_no=line_no,
+        ))
+    if head in limits.END_COMMANDS and ctx.end_line_no is None:
+        ctx.end_line_no = line_no
+
     # E-axis usage is a print-only concept; flag immediately.
     if "E" in params:
         result.diagnostics.append(Diagnostic(
@@ -458,11 +559,13 @@ def _apply_command(head: str, params: dict, state: ModalState,
 
     # Modal commands
     if head == "G20":
+        # Klipper answers G20 with an error, which ends the job. Keep the
+        # inch reading for bounds and the preview, but block the file.
         state.units_mm = False
         state.units_explicit = True
         result.diagnostics.append(Diagnostic(
-            "warning", "UNITS_INCH",
-            "G20 (inch) mode; normalised to mm for analysis",
+            "error", "UNITS_INCH",
+            "G20 (inches): Klipper rejects G20 and stops the job; export in millimetres (G21)",
             line_no=line_no,
         ))
         return
@@ -509,11 +612,11 @@ def _apply_command(head: str, params: dict, state: ModalState,
         ))
         # Bounds-update for arcs is approximated by the endpoint only in
         # Phase 1. Phase 2 thumbnail render does the full flattening.
-        _update_move(state, params, result, ctx, head, line_no)
+        _update_move(state, params, result, ctx, line_no)
         return
 
     if head in ("G0", "G1"):
-        _update_move(state, params, result, ctx, head, line_no)
+        _update_move(state, params, result, ctx, line_no)
         return
 
     if head == "G4":
@@ -522,10 +625,16 @@ def _apply_command(head: str, params: dict, state: ModalState,
     if head in limits.ALLOWED_G_COMMANDS or head in limits.ALLOWED_M_COMMANDS:
         return
 
+    # Contract commands: the machine defines them (end of job, colour change).
+    if head in limits.COLOR_CHANGE_COMMANDS:
+        result.stats.color_changes += 1
+        return
+    if head in limits.END_COMMANDS:
+        return
+
     # Embroidery-macro vs unknown-macro:
     if head in limits.EMBROIDERY_MACROS:
-        if head in ("COLOR_CHANGE", "STOP_FOR_COLOR_CHANGE"):
-            result.stats.color_changes += 1
+        _record_stitches(macro_stitches(head, command_text), state, result, ctx, line_no)
         return
 
     # G/M/T standard commands not in our allowlist -> unknown-but-likely
@@ -577,8 +686,25 @@ def _compute_new_xy(state: ModalState,
     return new_x, new_y
 
 
+def _compute_new_z(state: ModalState, params: dict) -> Optional[float]:
+    """Resolve the target Z (mm) of a move, or None when it has no Z."""
+    raw_z = _float_or_none(params.get("Z"))
+    if raw_z is None:
+        return None
+    dz = _to_mm(raw_z, state.units_mm)
+    if state.absolute:
+        return dz
+    return (state.z if state.z is not None else 0.0) + dz
+
+
+compute_new_z = _compute_new_z
+
+# Float noise in exported coordinates; a real Z step is never this small.
+_Z_EPSILON_MM = 1e-3
+
+
 def _update_move(state: ModalState, params: dict, result: AnalysisResult,
-                 ctx: "_ParseContext", head: str, line_no: int) -> None:
+                 ctx: "_ParseContext", line_no: int) -> None:
     feed = _float_or_none(params.get("F"))
     if feed is not None:
         if feed < limits.MIN_FEEDRATE:
@@ -604,25 +730,40 @@ def _update_move(state: ModalState, params: dict, result: AnalysisResult,
         ctx.feedrate_missing_warned = True
 
     new_xy = _compute_new_xy(state, params)
-    if new_xy is None:
-        return
-    new_x, new_y = new_xy
-    cur_x, cur_y = state.x, state.y
+    new_z = _compute_new_z(state, params)
+    # A job starts with the needle up at logical Z 0: Ink/Stitch and
+    # TurtleStitch both write absolute Z counted up from 0.
+    cur_z = state.z if state.z is not None else 0.0
+    z_changes = new_z is not None and abs(new_z - cur_z) > _Z_EPSILON_MM
 
-    result.bounds.expand(new_x, new_y)
-    result.stats.segment_count += 1
+    if new_xy is not None:
+        if z_changes:
+            result.diagnostics.append(Diagnostic(
+                "error", "XY_AND_Z_IN_ONE_MOVE",
+                "X/Y and Z change in one move: the frame would move while the "
+                "needle goes through the fabric. Move X/Y first, then Z",
+                line_no=line_no,
+            ))
+        elif not is_needle_up(cur_z):
+            result.diagnostics.append(Diagnostic(
+                "error", "XY_MOVE_NEEDLE_NOT_UP",
+                f"The frame moves while the needle is not up (Z {cur_z:.2f} is "
+                f"not a multiple of {limits.NEEDLE_PERIOD_MM:g}). Ink/Stitch: "
+                f"set Z travel per stitch to {limits.NEEDLE_PERIOD_MM:g}, not alternate",
+                line_no=line_no,
+            ))
+        result.bounds.expand(*new_xy)
+        result.stats.segment_count += 1
+        _settle(ctx.sequence.move(None), result)
+        state.x, state.y = new_xy
 
-    if head == "G1":
-        result.stats.stitch_count += 1
-    elif head == "G0":
-        result.stats.jump_count += 1
-        if cur_x is not None and cur_y is not None:
-            if math.hypot(new_x - cur_x, new_y - cur_y) > limits.LONG_JUMP_MM:
-                result.stats.long_jump_count += 1
-                result.diagnostics.append(Diagnostic(
-                    "warning", "LONG_JUMP",
-                    f"Travel move longer than {limits.LONG_JUMP_MM} mm; consider trimming",
-                    line_no=line_no,
-                ))
-
-    state.x, state.y = new_x, new_y
+    if new_z is not None:
+        if new_z < cur_z - _Z_EPSILON_MM:
+            result.diagnostics.append(Diagnostic(
+                "error", "Z_REVERSE",
+                f"Z goes back from {cur_z:.2f} to {new_z:.2f}: the handwheel "
+                "would turn backwards. Z only ever increases in a job",
+                line_no=line_no,
+            ))
+        state.z = new_z
+        _record_stitches(stitches_between(cur_z, new_z), state, result, ctx, line_no)

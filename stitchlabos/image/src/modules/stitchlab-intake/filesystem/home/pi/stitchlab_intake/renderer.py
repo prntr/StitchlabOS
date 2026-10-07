@@ -1,8 +1,9 @@
 """PNG thumbnail renderer for stickable G-code files.
 
 Streams the file once, maps coordinates from design-space mm into image
-pixels, and draws each G1 stitch segment with Pillow. Travel moves (G0)
-are hidden by default. G2/G3 arcs are approximated as chords in Phase 2;
+pixels, and draws each stitch segment with Pillow: an XY move that a needle
+cycle follows (the parser's stitch model, not G0/G1). Jumps are hidden by
+default. G2/G3 arcs are approximated as chords in Phase 2;
 proper arc flattening is a follow-up.
 
 The renderer consumes ``AnalysisResult.bounds`` to know where the design
@@ -24,12 +25,14 @@ from .parser import (
     ModalState,
     _compute_new_xy,
     _float_or_none,
+    compute_new_z,
     iter_lines,
     parse_command,
     sniff_encoding,
     split_line,
     to_mm,
 )
+from .stitch_model import StitchSequence, macro_stitches, stitches_between
 from .checks import HoopSpec
 from .frame_geometry import load_frame_geometry
 
@@ -77,7 +80,7 @@ class ThumbnailMeta:
 
 @dataclass
 class _MoveEvent:
-    kind: str                                     # "stitch" | "travel" | "arc"
+    kind: str                                     # "stitch" | "travel"
     end_x: float
     end_y: float
     color: Optional[tuple]                        # (r, g, b) or None
@@ -104,9 +107,23 @@ def _parse_color_comment(comment: str) -> Optional[tuple]:
 
 
 def _iter_render_moves(path: str) -> Iterator[_MoveEvent]:
+    """Yield every XY move, settled as stitch or travel by the parser's model.
+
+    A move is a stitch segment when a needle cycle (Z step through the next
+    needle-up position, or STITCH/LOCK_STITCH) follows it, travel otherwise;
+    G0 versus G1 does not matter (Ink/Stitch writes only G0).
+    """
     encoding, _, _ = sniff_encoding(path)
     state = ModalState()
+    sequence = StitchSequence()
     current_color: Optional[tuple] = None
+
+    def event(settled) -> Optional[_MoveEvent]:
+        if settled is None:
+            return None
+        kind, (end_x, end_y, color) = settled
+        return _MoveEvent(kind, end_x, end_y, color)
+
     try:
         for _line_no, raw in iter_lines(path, encoding):
             command_text, line_comment, paren_comments, _ = split_line(raw)
@@ -146,16 +163,32 @@ def _iter_render_moves(path: str) -> Iterator[_MoveEvent]:
                     else:
                         state.z = mm
                 continue
+            if macro_stitches(head, command_text):
+                settled = event(sequence.stitch())
+                if settled is not None:
+                    yield settled
+                continue
             if head not in ("G0", "G1", "G2", "G3"):
                 continue
             new_xy = _compute_new_xy(state, params)
-            if new_xy is None:
-                continue
-            kind = {"G0": "travel", "G1": "stitch"}.get(head, "arc")
-            yield _MoveEvent(kind, new_xy[0], new_xy[1], current_color)
-            state.x, state.y = new_xy
+            new_z = compute_new_z(state, params)
+            if new_xy is not None:
+                settled = event(sequence.move((new_xy[0], new_xy[1], current_color)))
+                if settled is not None:
+                    yield settled
+                state.x, state.y = new_xy
+            if new_z is not None:
+                cur_z = state.z if state.z is not None else 0.0
+                state.z = new_z
+                if stitches_between(cur_z, new_z):
+                    settled = event(sequence.stitch())
+                    if settled is not None:
+                        yield settled
     except UnicodeDecodeError:
-        return
+        pass
+    settled = event(sequence.finish())
+    if settled is not None:
+        yield settled
 
 
 # --- Public entry point --------------------------------------------------

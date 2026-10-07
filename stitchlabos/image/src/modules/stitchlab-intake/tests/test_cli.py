@@ -31,9 +31,11 @@ def test_analyze_blocked_file_exit_two(capsys):
     assert any(e["code"] == "COMMAND_BLOCKED" for e in doc["errors"])
 
 
-def test_analyze_warning_only_exit_one(capsys):
-    rc = cli.main(["analyze", fx("inch_units.gcode")])
-    # Inch mode emits warnings (UNITS_INCH, possibly UNITS_NOT_DECLARED-no).
+def test_analyze_warning_only_exit_one(tmp_path, capsys):
+    p = tmp_path / "no_feed.gcode"
+    p.write_text("G21\nG90\nG1 X1 Y1\nG1 Z5\nG1 X2 Y2\nG1 Z10\n")
+    rc = cli.main(["analyze", str(p)])
+    # Only FEEDRATE_MISSING: a warning, not an error.
     assert rc == 1
     doc = json.loads(capsys.readouterr().out)
     assert doc["status"] == "warnings"

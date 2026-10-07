@@ -8,5 +8,6 @@ bump invalidates all cached reports without touching files on disk.
 SCHEMA_VERSION names the JSON shape consumed by Mainsail / dashboard.
 """
 
-CHECKER_VERSION = "v3"  # v3: upload/recheck verdicts use the default hoop
+CHECKER_VERSION = "v4"  # v4: Z-step stitch model, contract commands, G20 and
+                        # (...) comments block, machine travel check
 SCHEMA_VERSION = "stitchlab_intake.v1"

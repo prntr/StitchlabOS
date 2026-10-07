@@ -21,13 +21,25 @@ ALLOWED_G_COMMANDS = frozenset({
     "G0", "G1",          # linear moves
     "G2", "G3",          # arcs (flattened by parser)
     "G4",                # dwell
-    "G20", "G21",        # units
+    "G21",               # millimetres (Klipper rejects G20; see parser)
     "G90", "G91",        # absolute / relative
     "G92",               # set position
 })
 
 ALLOWED_M_COMMANDS = frozenset({
     "M400",              # wait for moves to complete
+})
+
+# --- Commands of the StitchLAB G-code contract ---------------------------
+#
+# The machine side defines these as macros (beta6 contract between the
+# machine config, the producers and this intake). Klipper parses "M00" as
+# its own command, not as "M0", so both spellings are listed.
+
+END_COMMANDS = frozenset({"M2", "M30"})            # end of job: needle up
+COLOR_CHANGE_COMMANDS = frozenset({
+    "M0", "M00",                                   # Ink/Stitch writes M00
+    "COLOR_CHANGE", "STOP_FOR_COLOR_CHANGE",
 })
 
 # --- Blocked commands (hard errors) --------------------------------------
@@ -62,7 +74,17 @@ EMBROIDERY_MACROS = frozenset({
 
 MIN_FEEDRATE = 1.0                # mm/min — F0 is an error
 MAX_FEEDRATE = 60000.0            # mm/min — F over this is an error
-LONG_JUMP_MM = 30.0               # travel without stitching above this -> trim suggestion
+LONG_JUMP_MM = 30.0               # thread between two stitches above this -> trim suggestion
+
+# --- Needle model --------------------------------------------------------
+#
+# Z is the handwheel: one turn = NEEDLE_PERIOD_MM = one stitch, needle up at
+# multiples of it (embroidery_macros.cfg, beta6 contract "one stitch = Z +5").
+# The tolerance is the needle-up window NEEDLE_TOGGLE uses (z mod 5 < 0.5).
+
+NEEDLE_PERIOD_MM = 5.0
+NEEDLE_UP_TOLERANCE_MM = 0.5
+LOCK_STITCH_DEFAULT_COUNT = 3     # LOCK_STITCH without COUNT= (embroidery_macros.cfg)
 
 # Stitch density: warn when more than N stitches fall into a circle of
 # radius R mm. Tuned conservatively; refined once we have real fixtures.

@@ -58,10 +58,11 @@ def test_no_xy_geometry():
     assert not r.bounds.is_valid
 
 
-def test_inch_units_warning_and_conversion():
+def test_inch_units_block_the_job_but_bounds_convert():
     r = parse_file(fx("inch_units.gcode"))
-    # Inch mode warning fires, but file itself is otherwise valid.
+    # Klipper answers G20 with an error that ends the job.
     assert "UNITS_INCH" in codes(r)
+    assert r.status == "blocked"
     # Bounds get normalised to mm: 1 inch = 25.4 mm.
     assert r.bounds.width == pytest.approx(25.4)
     assert r.bounds.height == pytest.approx(25.4)
@@ -85,10 +86,12 @@ def test_unknown_macros_are_recorded():
     assert "ANOTHER_THING" in r.referenced_unknown_macros
 
 
-def test_long_jumps_emit_warning_and_increment_counter():
+def test_long_thread_between_stitches_warns():
     r = parse_file(fx("long_jumps.gcode"))
     assert "LONG_JUMP" in codes(r)
-    assert r.stats.long_jump_count >= 2
+    assert r.stats.long_jump_count == 2
+    assert r.stats.stitch_count == 4
+    assert r.stats.jump_count == 2
 
 
 def test_units_not_declared(tmp_path):
