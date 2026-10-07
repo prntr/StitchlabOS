@@ -58,7 +58,7 @@ rename fails the build instead of shipping mute firmware.
 
 **Klipper version.** Host and firmware are both built from the release's pin,
 `KLIPPER_REF` in [`stitchlabos/image/upstream-pins.conf`](../stitchlabos/image/upstream-pins.conf),
-and carry the same version string (`v0.13.0-786-g461c4e37` for beta6). The Update
+and carry the same version string (`v0.13.0-786-g461c4e3722c3` for beta6; Moonraker's panel abbreviates it to `v0.13.0-786-g461c4e37`). The Update
 Manager is pinned to that commit, so it offers no Klipper update until a release
 moves the pin; after such a move, reflash the Pico with `stitchlab-flash-pico --uart`.
 See [Release pins and the drift check](#release-pins-and-the-drift-check).
