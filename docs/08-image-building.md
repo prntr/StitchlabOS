@@ -92,6 +92,24 @@ new lines in `docs/Config_Changes.md`, and mainsail-config's new commits. It exi
 only when a sample breaks its own expectation at the pin (header lines
 `; drift: expect=…`, `log=…`, `nolog=…`).
 
+The samples also hold the machine side of the beta6 G-code contract
+(`stitchlabos-config`'s `embroidery_macros.cfg`) to what the intake assumes:
+
+- `M30` and `M2` end a job without an error. `M30` is a macro that replaces
+  `virtual_sdcard`'s own `M30` (an error, "SD write not supported") with
+  `rename_existing: M30.1`, so a Klipper change to that registration is drift
+  that matters.
+- `M0`, `M00`, `M600` and `COLOR_CHANGE` pause in place; while paused the idle
+  timeout is `pause_idle_timeout` (1800 s), so the motors stay on during rethreading.
+- `SDCARD_PRINT_FILE` starts every job with needle up, `G90`, `G92 Z0` and
+  `G1 F<job_feedrate>` (default `max_z_velocity` × 60). Job files therefore need no
+  `F`, and the intake reports a missing one only as info.
+- A needle or homing macro inside a job stops it ("refused: a job is printing");
+  the intake blocks such files (`NEEDLE_MACRO_IN_JOB`).
+
+With the `embroidery_macros.cfg` the submodule pinned before beta6 the check fails on
+purpose: `M30` ends the job in an error and `M00` does not pause.
+
 Batch mode cannot show what an endstop does: homing never triggers, so the check
 runs with `[stepper_z] position_max: 200` (`stitchlabos/drift/sim.cfg`). Try a
 macro change with `KLIPPER_DRIFT_MACROS=<path>`, a pin move with
