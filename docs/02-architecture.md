@@ -66,7 +66,7 @@ Macros use `G92` to hide physical Z movement from the logical position.
 |-------|----------|---------|
 | Klipper macros | `stitchlabos-config/printer_data/config/embroidery_macros.cfg` | Needle model, stitch commands |
 | WiFi manager | `stitchlabos-config/moonraker/components/wifi_manager.py` | Moonraker WiFi API extension |
-| Deploy scripts | `stitchlabos/scripts/rpi/` | Reproducible Pi setup |
+| Mainsail deploy script | `stitchlabos/scripts/rpi/deploy_mainsail_dist.sh` | Copy a local Mainsail build to a Pi (UI development); macros and Wi-Fi reach machines through `stitchlabos-config` releases |
 | Embroidery UI | `mainsail/src/components/panels/EmbroideryControlPanel.vue` | Web controls |
 | Controller menu | `mainsail/src/components/TheControllerMenu.vue` | Dongle/WiFi UI |
 | G-Code Studio | `mainsail/src/components/gcodestudio/` | Embroidery visualization |
