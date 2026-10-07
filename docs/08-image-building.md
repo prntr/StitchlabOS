@@ -56,14 +56,47 @@ notes say `CONFIG_RP2040_FLASH_START_4000`); the addresses are unchanged. CI
 asserts that every seeded symbol survives `make olddefconfig`, so a further
 rename fails the build instead of shipping mute firmware.
 
-**Klipper version.** Host and firmware are both built from master within the same
-CI run. After `update_manager` later updates the host Klipper, reflash the Pico
-with `stitchlab-flash-pico --uart` to clear the version-mismatch warning.
+**Klipper version.** Host and firmware are both built from the release's pin,
+`KLIPPER_REF` in [`stitchlabos/image/upstream-pins.conf`](../stitchlabos/image/upstream-pins.conf),
+and carry the same version string (`v0.13.0-786-g461c4e37` for beta6). The Update
+Manager is pinned to that commit, so it offers no Klipper update until a release
+moves the pin; after such a move, reflash the Pico with `stitchlab-flash-pico --uart`.
+See [Release pins and the drift check](#release-pins-and-the-drift-check).
 
 ## GitHub Repository
 
 - Repo: `https://github.com/prntr/StitchlabOS`
 - Main submodules: `mainsail` → `prntr/mainsail` (branch `stitchlabos/v2.17.0`), `turtlestitch` → `prntr/turtlestitch` (branch `master`), `stitchlabos-config` → `prntr/stitchlabos-config` (branch `main`)
+
+## Release pins and the drift check
+
+[`stitchlabos/image/upstream-pins.conf`](../stitchlabos/image/upstream-pins.conf) fixes
+the upstream commits a release ships: Klipper, Katapult, Moonraker and
+mainsail-config (wissen D-072; beta6 uses the beta5 build's commits). CI builds the
+firmware from them and the image modules clone exactly them; Moonraker's Update
+Manager is pinned to the Klipper and Moonraker commits.
+
+`make klipper-drift` (Docker and network; `.github/workflows/klipper-drift.yml`
+runs it weekly and on every release tag, next to the image build) runs our
+`printer.cfg` (and a hybrid-gantry variant), `embroidery_macros.cfg` at the pinned
+`stitchlabos-config` commit, `mainsail.cfg` and the synthetic jobs in
+`stitchlabos/drift/samples/` through klippy batch mode — the way Klipper's own
+`scripts/test_klippy.py` does, against the SKR Pico's data dictionary built from
+`firmware/skr-pico/klipper.config` — once at the pin and once at upstream master.
+The report (`.local/klipper-drift/<time>/report.md`, a CI artefact and job summary)
+lists samples that misbehave at the pin, differences in exit status, Klipper's
+responses and MCU commands between the two, the upstream commits since the pin that
+touch `gcode.py`, `gcode_move.py`, `virtual_sdcard.py`, `homing.py`,
+`homing_override.py`, `pause_resume.py`, `gcode_macro.py` and `configfile.py`, the
+new lines in `docs/Config_Changes.md`, and mainsail-config's new commits. It exits 1
+only when a sample breaks its own expectation at the pin (header lines
+`; drift: expect=…`, `log=…`, `nolog=…`).
+
+Batch mode cannot show what an endstop does: homing never triggers, so the check
+runs with `[stepper_z] position_max: 200` (`stitchlabos/drift/sim.cfg`). Try a
+macro change with `KLIPPER_DRIFT_MACROS=<path>`, a pin move with
+`KLIPPER_DRIFT_PIN=<commit>`, and a local `printer.cfg` that must not enter the repo
+with `KLIPPER_DRIFT_EXTRA="name=/path/printer.cfg"`.
 
 ## Using Pre-built Images
 
@@ -104,13 +137,13 @@ GitHub Actions builds on tags (`v*`) and manual dispatch. **Never** on every pus
 
 ### Build Steps (in order)
 
-1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail`, `prntr/turtlestitch` and `prntr/stitchlabos-config`)
+1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail`, `prntr/turtlestitch` and `prntr/stitchlabos-config`), then load the pins from `stitchlabos/image/upstream-pins.conf` and check the release tags: on a `v*` tag, `prntr/stitchlabos-config` and `prntr/turtlestitch` must carry the same tag at the pinned submodule commits, or the build stops here with the commands to create them ([09-update-strategy.md](09-update-strategy.md#versions-and-tags))
 2. Build Mainsail: `npm ci && npm run build`, copy `dist/` → `modules/mainsail/filesystem/home/pi/mainsail/`
 3. Prepare TurtleStitch as a standalone repo in `modules/turtlestitch/filesystem/home/pi/turtlestitch/`. The submodule itself cannot be copied: checkout leaves it with a `.git` *file* (`gitdir: ../.git/modules/turtlestitch`) and a detached HEAD, which Moonraker's update_manager rejects on the Pi. The step checks that the submodule commit is on `origin/master` (fails otherwise), then builds a shallow clone from the local submodule — just deep enough to reach that commit from `origin/master` — with `master` checked out on the commit, tracking `origin/master` on `https://github.com/prntr/turtlestitch.git`. The remote fetches `master` only (`remote add -t master`): the other branches would pull the full ~1.4 GB history on the Pi's first update check. The turtlestitch module's `start_chroot_script` fails the build if the unpacked repo is not a clean `master` tracking `origin/master`.
 4. Install host dependencies (including `gitpython` for CustomPiOS's `execution_order.py`)
 5. Clone CustomPiOS (`--depth=1`)
 6. Download Raspberry Pi OS Lite arm64 (`.img.xz`) into `stitchlabos/image/src/image-raspberrypiarm64/` — **this exact path is required** by CustomPiOS's `generate_board_config.py` which searches `$DIST_PATH/image-{BOARD}/` for `*.xz` files to set `BASE_ZIP_IMG`. The image is also **expanded to 6GB** before recompressing: Pi OS Lite only has ~1.5GB free on its rootfs which isn't enough for Klipper/Moonraker deps + pip virtualenvs. Expansion: `truncate -s 6G img` → `parted resizepart 2 100%` → `losetup -P` → `e2fsck -fy` + `resize2fs` → `xz -1 -T0`.
-7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... STITCHLABOS_CONFIG_REF=... KLIPPER_REF=... KATAPULT_REF=... bash -x .../build`. Each `*_REF` is a commit resolved earlier in the job: `STITCHLABOS_CONFIG_REF` is the submodule pin, `KLIPPER_REF` and `KATAPULT_REF` are the commits the firmware step built `klipper.bin`/`klipper.uf2` and `katapult.uf2` from. The modules clone with `stitchlab-clone-at-ref` (shipped by the `klipper` module), which puts the branch on exactly that commit — so host Klipper and the Pico firmware run the same commit, `flashtool.py` matches the bootloader, and a tag rebuilds the same image. The commit must be on the tracked branch (`main`/`master`) and the checkout stays that branch tracking `origin`; a detached or diverged checkout would block Moonraker's update_manager on the Pi, so the build fails instead.
+7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... STITCHLABOS_CONFIG_REF=... KLIPPER_REF=... KATAPULT_REF=... MOONRAKER_REF=... MAINSAIL_CONFIG_REF=... bash -x .../build`. `STITCHLABOS_CONFIG_REF` is the submodule pin; the other four come from `upstream-pins.conf`, and the firmware step built `klipper.bin`/`klipper.uf2` and `katapult.uf2` from `KLIPPER_REF` and `KATAPULT_REF`. The modules clone with `stitchlab-clone-at-ref` (shipped by the `klipper` module), which puts the branch on exactly that commit — so host Klipper and the Pico firmware run the same commit, `flashtool.py` matches the bootloader, and a tag rebuilds the same image — and then deepens to the nearest version tag, so the Update Manager shows a real version. The commit must be on the tracked branch (`main`/`master`) and the checkout stays that branch tracking `origin`; a detached or diverged checkout would block Moonraker's update_manager on the Pi, so the build fails instead.
 8. Compress output with `xz -9`, generate sha256
 9. Upload as artifact (7-day retention)
 10. On tags: create the GitHub Release as a **draft**, check it through the API (every asset uploaded and non-empty, `os_list.json` names this release's image with its size, the uploaded `os_list.json` is the generated one, the icon resolves), publish it, then check the public URLs including `/releases/latest/`. A failing draft check leaves the release unpublished; a failing public check turns it back into a draft.
@@ -169,7 +202,7 @@ MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd
 ### Module Script Notes
 
 - **virtualenvs**: Use `virtualenv -p python3 <path>` not `python3 -m venv` — `ensurepip` fails on Debian Trixie
-- **git clones**: Always shallow to save image space. A repo whose commit must match something else (Klipper ↔ Pico firmware, Katapult ↔ `katapult.uf2`, a submodule pin) is cloned with `/usr/local/bin/stitchlab-clone-at-ref URL BRANCH REF DEST`, which deepens only as far as that commit
+- **git clones**: Always shallow to save image space. A repo whose commit must match something else (Klipper ↔ Pico firmware, Katapult ↔ `katapult.uf2`, a submodule pin, a pin in `upstream-pins.conf`) is cloned with `/usr/local/bin/stitchlab-clone-at-ref URL BRANCH REF DEST`, which deepens only as far as that commit and its nearest version tag (Klipper: about 800 commits, 18 MB)
 - **Klipper/Moonraker**: Remove `docs/` after cloning — large image assets cause "No space left on device"
 - **ARM toolchain** (`gcc-arm-none-eabi`, `libnewlib-arm-none-eabi`, `avrdude`): NOT installed in the image — firmware is compiled on a dev machine, not on the Pi
 - **Mainsail/TurtleStitch**: Both `start_chroot_script` files must call `unpack /filesystem/home/pi /home/pi pi` to copy CI-built assets into the image
@@ -198,7 +231,11 @@ No Pi Imager customization needed — StitchLabOS is ready to use out of the box
 1. **AP Mode**: On first boot (no WiFi configured), AccessPopup creates a hotspot within ~30 seconds
    - SSID: `Stitchlab`, password: `praxistest`, IP: `192.168.50.5`
 2. **Adding WiFi**: Connect to the Stitchlab AP → open `http://stitchlab.local` (or `http://192.168.50.5`) → use the WiFi Manager in Mainsail
-3. **SSH**: Enabled by default. Login: `pi` / `lab`
+3. **SSH**: Enabled by default. Login: `pi` / `lab`. IPv4 only, like nginx, Moonraker
+   and Avahi (`stitchlab.local` resolves to IPv4 only): a hotspot with an IPv6 uplink
+   gives the Pi a global IPv6 address, and the default password should not be
+   offered there (`/etc/ssh/sshd_config.d/10-stitchlab-ipv4-only.conf`,
+   `stitchlab-configure-avahi`)
 4. **Hostname**: `stitchlab` (resolves as `stitchlab.local` via avahi)
 
 ### Access
@@ -313,7 +350,7 @@ sudo passwd pi
 
 - The base image is expanded to 6GB in the CI workflow before building (see step 6 above)
 - ARM toolchain (`gcc-arm-none-eabi` etc.) is NOT installed — ~700MB saving
-- All `git clone` calls use `--depth=1`
+- All `git clone` calls are shallow (`--depth=1`, or deepened only to the pinned commit and its nearest tag)
 - `docs/` is removed from Klipper and Moonraker after cloning
 
 ### "Error: could not find image"

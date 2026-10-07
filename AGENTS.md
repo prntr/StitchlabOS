@@ -69,7 +69,8 @@ you actually edited.
 | `make test-pico` | pytest for the Pico flash tools (`stitchlab-flash-pico`, `stitchlab-uf2-clear-app`) — fast, no hardware |
 | `make test-wifi` | pytest for the Wi-Fi manager (Moonraker component and scripts in `stitchlabos-config`) — fast, no NetworkManager |
 | `make test-jogd` | pytest for the `live_jogd` daemon against a fake serial port — fast, no dongle |
-| `make test-image` | pytest for the `stitchlabos` module's scripts (`stitchlab-first-boot-name`) against a fake root — fast, no Pi |
+| `make test-image` | pytest for the image scripts (`stitchlabos` module: first-boot name, Avahi; `klipper` module: `stitchlab-clone-at-ref` against local repos; the drift check's evaluation) — fast, no Pi, no network |
+| `make klipper-drift` | our configs and sample jobs through klippy batch mode at the pins in `stitchlabos/image/upstream-pins.conf` and at upstream master — Docker and network, not part of `make check` |
 | `make lint` | Mainsail's linter + dead links in `docs/` |
 | `make check` | `lint` + `test` — the gate before any commit |
 | `make status` | state of all nested repos |
