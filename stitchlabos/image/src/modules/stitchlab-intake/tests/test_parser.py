@@ -71,12 +71,16 @@ def test_inch_units_block_the_job_but_bounds_convert():
     assert r.units_explicit is True
 
 
-def test_inkstitch_macros_collected_and_color_change_counted():
+def test_macro_style_file_is_blocked_and_its_colour_change_counted():
+    # The old macro-per-stitch style: STITCH is a panel macro the machine
+    # refuses during a job; TRIM is no machine macro and is checked against
+    # Klipper; COLOR_CHANGE is a contract command.
     r = parse_file(fx("inkstitch_like.gcode"))
     assert "UNTERMINATED_PAREN" not in codes(r)
     assert r.detected_origin == "inkstitch"
-    # STITCH/TRIM/COLOR_CHANGE are known embroidery macros, not "unknown".
-    assert r.referenced_unknown_macros == set()
+    assert "NEEDLE_MACRO_IN_JOB" in codes(r)
+    assert r.status == "blocked"
+    assert r.referenced_unknown_macros == {"TRIM"}
     assert r.stats.color_changes == 1
 
 

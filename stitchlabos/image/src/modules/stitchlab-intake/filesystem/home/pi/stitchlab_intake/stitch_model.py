@@ -7,7 +7,6 @@ needle up at multiples of 5 (``embroidery_macros.cfg``).
 
 from __future__ import annotations
 
-import re
 from typing import Optional
 
 from . import limits
@@ -41,19 +40,6 @@ def is_stitch_step(z_from: float, z_to: float) -> bool:
 def is_one_turn(z_from: float, z_to: float) -> bool:
     """Whether a Z step is exactly one stitch (+NEEDLE_PERIOD_MM)."""
     return abs((z_to - z_from) - limits.NEEDLE_PERIOD_MM) <= Z_STEP_TOLERANCE_MM
-
-
-_COUNT_PARAM_RE = re.compile(r"\bCOUNT\s*=\s*(\d+)", re.IGNORECASE)
-
-
-def macro_stitches(head: str, command_text: str) -> int:
-    """Stitches made by the embroidery macros that turn the handwheel."""
-    if head == "STITCH":
-        return 1
-    if head == "LOCK_STITCH":
-        m = _COUNT_PARAM_RE.search(command_text)
-        return int(m.group(1)) if m else limits.LOCK_STITCH_DEFAULT_COUNT
-    return 0
 
 
 class StitchSequence:

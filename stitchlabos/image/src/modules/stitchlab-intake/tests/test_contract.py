@@ -90,11 +90,32 @@ def test_turtlestitch_beta6_export_is_valid():
     assert "FEEDRATE_MISSING" in by_severity(r, "info")
 
 
-def test_stitch_macros_count(tmp_path):
-    r = parse_text(tmp_path, "G21\nG90\nG1 X1 Y1 F600\nSTITCH\nG1 X2 Y2\nLOCK_STITCH\n"
-                             "G1 X3 Y3\nLOCK_STITCH COUNT=4\n")
-    assert r.stats.stitch_count == 1 + 3 + 4
+@pytest.mark.parametrize("macro", ["NEEDLE_TOGGLE", "STITCH", "LOCK_STITCH COUNT=4",
+                                   "NEEDLE_ADJUST AMOUNT=0.1", "ZERO_NEEDLE_POSITION",
+                                   "EMBROIDERY_HOME"])
+def test_needle_macros_in_a_job_are_blocked(tmp_path, macro):
+    # The machine refuses these while a job prints, which stops the job.
+    r = parse_text(tmp_path, f"G21\nG90\nG1 X1 Y1 F600\nG1 Z5\n{macro}\nG1 X2 Y2\nG1 Z10\n")
+    errors = [d for d in r.diagnostics if d.severity == "error"]
+    assert [(d.code, d.line_no) for d in errors] == [("NEEDLE_MACRO_IN_JOB", 5)]
+    assert "refuses it while a job runs" in errors[0].message
+    assert r.stats.stitch_count == 2           # only the Z steps count
     assert r.referenced_unknown_macros == set()
+
+
+def test_homing_in_a_job_is_blocked(tmp_path):
+    r = parse_text(tmp_path, "G21\nG90\nG28\nG1 X1 Y1 F600\nG1 Z5\n")
+    errors = [d for d in r.diagnostics if d.severity == "error"]
+    assert [d.code for d in errors] == ["COMMAND_BLOCKED"]
+    assert "refused during a job" in errors[0].message
+
+
+def test_macros_the_machine_does_not_define_are_checked_against_klipper(tmp_path):
+    # Legacy names, not contract commands: the start flow checks them
+    # against Klipper's gcode_macro list instead of trusting them.
+    r = parse_text(tmp_path, "G21\nG90\nG1 X1 Y1 F600\nG1 Z5\nTRIM\nSTOP_FOR_COLOR_CHANGE\n")
+    assert r.referenced_unknown_macros == {"TRIM", "STOP_FOR_COLOR_CHANGE"}
+    assert r.stats.color_changes == 0
 
 
 def test_frame_without_needle_warns(tmp_path):

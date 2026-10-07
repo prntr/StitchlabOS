@@ -21,6 +21,7 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -47,6 +48,7 @@ NOISE_PREFIXES = (
     "Configured MCU", "Running full garbage collection", "Unfreezing garbage",
 )
 CONFIG_DUMP_END = "======================="
+KLIPPER_CHECKOUT_RE = re.compile(r"/tmp/drift-work/klipper-[a-z]+/")
 
 
 @dataclass
@@ -149,7 +151,8 @@ def responses_of(log_text: str) -> list[str]:
             continue
         in_busy_report = False
         if line.strip() and not line.startswith(NOISE_PREFIXES) and not line.startswith(";"):
-            kept.append(line.rstrip())
+            # Tracebacks name the checkout; both sides use their own.
+            kept.append(KLIPPER_CHECKOUT_RE.sub("<klipper>/", line.rstrip()))
     return kept
 
 

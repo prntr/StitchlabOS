@@ -92,3 +92,8 @@ def test_expectations():
     assert drift.check_expectations(sample, run) == []
     bad = drift.Run(exit_code=255, responses=["DRIFT pos X=20.000"], mcu_lines=0, mcu_digest="x {}")
     assert len(drift.check_expectations(sample, bad)) == 3
+
+
+def test_responses_hide_the_checkout_path():
+    log = LOG + '  File "/tmp/drift-work/klipper-upstream/klippy/extras/gcode_macro.py", line 70\n'
+    assert drift.responses_of(log)[-1] == '  File "<klipper>/klippy/extras/gcode_macro.py", line 70'

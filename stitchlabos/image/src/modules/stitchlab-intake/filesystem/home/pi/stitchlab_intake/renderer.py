@@ -32,7 +32,7 @@ from .parser import (
     split_line,
     to_mm,
 )
-from .stitch_model import StitchSequence, is_stitch_step, macro_stitches
+from .stitch_model import StitchSequence, is_stitch_step
 from .checks import HoopSpec
 from .frame_geometry import load_frame_geometry
 
@@ -109,9 +109,8 @@ def _parse_color_comment(comment: str) -> Optional[tuple]:
 def _iter_render_moves(path: str) -> Iterator[_MoveEvent]:
     """Yield every XY move, settled as stitch or travel by the parser's model.
 
-    A move is a stitch segment when a needle cycle (Z step through the next
-    needle-up position, or STITCH/LOCK_STITCH) follows it, travel otherwise;
-    G0 versus G1 does not matter (Ink/Stitch writes only G0).
+    A move is a stitch segment when a Z step up follows it, travel
+    otherwise; G0 versus G1 does not matter (Ink/Stitch writes only G0).
     """
     encoding, _, _ = sniff_encoding(path)
     state = ModalState()
@@ -162,11 +161,6 @@ def _iter_render_moves(path: str) -> Iterator[_MoveEvent]:
                         state.y = mm
                     else:
                         state.z = mm
-                continue
-            if macro_stitches(head, command_text):
-                settled = event(sequence.stitch())
-                if settled is not None:
-                    yield settled
                 continue
             if head not in ("G0", "G1", "G2", "G3"):
                 continue

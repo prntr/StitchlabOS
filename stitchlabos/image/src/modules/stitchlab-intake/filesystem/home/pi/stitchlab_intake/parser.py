@@ -28,7 +28,6 @@ from .stitch_model import (
     is_needle_up,
     is_one_turn,
     is_stitch_step,
-    macro_stitches,
 )
 
 
@@ -431,7 +430,7 @@ def _consume(lines: Iterable[tuple[int, str]], result: AnalysisResult) -> None:
         if head is None:
             continue
         result.stats.command_count += 1
-        _apply_command(head, params, command_text, state, result, ctx, line_no)
+        _apply_command(head, params, state, result, ctx, line_no)
 
     _settle(ctx.sequence.finish(), result)
 
@@ -439,7 +438,7 @@ def _consume(lines: Iterable[tuple[int, str]], result: AnalysisResult) -> None:
         result.diagnostics.append(Diagnostic(
             "warning", "NO_STITCHES",
             "The file moves the frame but never turns the needle: a stitch "
-            f"is a Z step of +{limits.NEEDLE_PERIOD_MM:g} mm (or STITCH)",
+            f"is a Z step of +{limits.NEEDLE_PERIOD_MM:g} mm",
         ))
 
     if not state.units_explicit:
@@ -526,9 +525,9 @@ def _absorb_stitchlab_meta(comment: str, result: AnalysisResult, line_no: int) -
 # --- Command application -------------------------------------------------
 
 
-def _apply_command(head: str, params: dict, command_text: str,
-                   state: ModalState, result: AnalysisResult,
-                   ctx: "_ParseContext", line_no: int) -> None:
+def _apply_command(head: str, params: dict, state: ModalState,
+                   result: AnalysisResult, ctx: "_ParseContext",
+                   line_no: int) -> None:
     # Klipper does not stop at M30/M2: everything after it still runs.
     if ctx.end_line_no is not None and not ctx.after_end_warned:
         ctx.after_end_warned = True
@@ -550,9 +549,20 @@ def _apply_command(head: str, params: dict, command_text: str,
         ))
 
     # Classification
+    if head in limits.NEEDLE_MACROS:
+        result.diagnostics.append(Diagnostic(
+            "error", "NEEDLE_MACRO_IN_JOB",
+            f"{head} is a panel macro: the machine refuses it while a job "
+            "runs, which stops the job. In a job file a stitch is a Z step "
+            f"of +{limits.NEEDLE_PERIOD_MM:g} mm",
+            line_no=line_no,
+        ))
+        return
     if head in limits.BLOCKED_COMMANDS:
         result.diagnostics.append(Diagnostic(
             "error", "COMMAND_BLOCKED",
+            "G28 (homing) is refused during a job: the machine homes before "
+            "the job starts" if head == "G28" else
             f"Command {head} is blocked from stick jobs",
             line_no=line_no,
         ))
@@ -637,11 +647,6 @@ def _apply_command(head: str, params: dict, command_text: str,
         result.stats.color_changes += 1
         return
     if head in limits.END_COMMANDS:
-        return
-
-    # Embroidery-macro vs unknown-macro:
-    if head in limits.EMBROIDERY_MACROS:
-        _record_stitches(macro_stitches(head, command_text), state, result, ctx, line_no)
         return
 
     # G/M/T standard commands not in our allowlist -> unknown-but-likely
@@ -738,7 +743,8 @@ def _update_move(state: ModalState, params: dict, result: AnalysisResult,
 
     new_xy = _compute_new_xy(state, params)
     new_z = _compute_new_z(state, params)
-    # A job starts with the needle up at logical Z 0: Ink/Stitch and
+    # A job starts with the needle up at logical Z 0: the machine's job start
+    # (_STITCH_JOB_START) does needle up and G92 Z0, and Ink/Stitch and
     # TurtleStitch both write absolute Z counted up from 0.
     cur_z = state.z if state.z is not None else 0.0
     z_changes = new_z is not None and abs(new_z - cur_z) > Z_EPSILON_MM
