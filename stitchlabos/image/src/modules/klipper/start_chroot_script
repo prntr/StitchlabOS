@@ -34,10 +34,16 @@ chmod +x /usr/local/bin/stitchlab-clone-at-ref
 : "${KLIPPER_REF:?not set - CI passes the commit it built the Pico firmware from (build-image.yml)}"
 echo "Cloning Klipper at ${KLIPPER_REF}..."
 sudo -u pi /usr/local/bin/stitchlab-clone-at-ref "${KLIPPER_REPO}" "${KLIPPER_BRANCH}" "${KLIPPER_REF}" "${KLIPPER_DIR}"
+# Klipper's version string is `git describe`; a fixed abbreviation makes the
+# host's equal the firmware's (build-image.yml sets the same), so the two
+# klippy.log lines of docs/08-image-building.md match character for character.
+sudo -u pi git -C "${KLIPPER_DIR}" config core.abbrev 12
 
-# Clone Moonraker (shallow)
-echo "Cloning Moonraker..."
-sudo -u pi git clone --depth=1 ${MOONRAKER_REPO} ${MOONRAKER_DIR}
+# Clone Moonraker at the release's pin (stitchlabos/image/upstream-pins.conf), with its
+# last release tag so the Update Manager shows a real version.
+: "${MOONRAKER_REF:?not set - CI passes MOONRAKER_REF from stitchlabos/image/upstream-pins.conf (build-image.yml)}"
+echo "Cloning Moonraker at ${MOONRAKER_REF}..."
+sudo -u pi /usr/local/bin/stitchlab-clone-at-ref "${MOONRAKER_REPO}" "${MOONRAKER_BRANCH}" "${MOONRAKER_REF}" "${MOONRAKER_DIR}"
 
 # Create Klipper virtual environment (use virtualenv, more reliable on Debian)
 echo "Setting up Klipper virtualenv..."
@@ -58,6 +64,20 @@ sudo -u pi mkdir -p ${PRINTER_DATA}/{config,gcodes,logs,comms,certs,systemd,scri
 # Install systemd service files (from filesystem/)
 unpack /filesystem/etc /etc root
 unpack /filesystem/home/pi /home/pi pi
+
+# Pin Klipper and Moonraker in the Update Manager to the commits shipped
+# (wissen D-072). A click on "update" would otherwise move host Klipper off
+# the commit the SKR Pico firmware was built from. A release moves the pins.
+cat >> ${PRINTER_DATA}/config/moonraker.conf << EOF
+
+# === STITCHLABOS: release pins (stitchlabos/image/upstream-pins.conf) ===
+[update_manager klipper]
+pinned_commit: ${KLIPPER_REF}
+
+[update_manager moonraker]
+pinned_commit: ${MOONRAKER_REF}
+EOF
+chown pi:pi ${PRINTER_DATA}/config/moonraker.conf
 
 # Install Moonraker polkit rules (allows service management, reboot, package install)
 mkdir -p /etc/polkit-1/rules.d

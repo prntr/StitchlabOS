@@ -151,6 +151,81 @@ def check_hoop_bounds(result: AnalysisResult,
         ))
 
 
+@dataclass(frozen=True)
+class MachineLimits:
+    """XY travel of the machine Klipper runs, in machine coordinates.
+
+    The single source is Klipper's loaded config (``[stepper_x]`` /
+    ``[stepper_y]`` ``position_min``/``position_max`` of the running
+    ``printer.cfg``), read through Moonraker at analysis time. The hoop
+    (hoops.json) is a property of the frame, not of the machine; a design
+    has to fit both. The image's printer.cfg travels X 0..90, Y 0..120,
+    the 2026-09-29 hybrid config X 0..80, Y 0..130, the hoop is 80 x 130.
+    """
+    x_min: float
+    x_max: float
+    y_min: float
+    y_max: float
+
+    @classmethod
+    def from_klipper_settings(cls, settings: object) -> Optional["MachineLimits"]:
+        """Parse Klipper's ``configfile.settings``; None if X/Y travel is missing."""
+        if not isinstance(settings, dict):
+            return None
+        try:
+            values = {}
+            for axis in ("x", "y"):
+                stepper = settings[f"stepper_{axis}"]
+                values[f"{axis}_min"] = float(stepper.get("position_min", 0.0))
+                values[f"{axis}_max"] = float(stepper["position_max"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None
+        return cls(**values)
+
+    @classmethod
+    def from_dict(cls, data: object) -> Optional["MachineLimits"]:
+        """Parse the ``{"x": [min, max], "y": [min, max]}`` form of ``as_dict``."""
+        if not isinstance(data, dict):
+            return None
+        try:
+            (x_min, x_max), (y_min, y_max) = data["x"], data["y"]
+            return cls(float(x_min), float(x_max), float(y_min), float(y_max))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def as_dict(self) -> dict:
+        return {"x": [self.x_min, self.x_max], "y": [self.y_min, self.y_max]}
+
+
+def check_machine_bounds(result: AnalysisResult,
+                         machine: Optional[MachineLimits],
+                         bounds: Optional[Bounds] = None) -> None:
+    """Block a placed design that leaves the machine's XY travel.
+
+    Klipper stops the job with "Move out of range" at the first such move,
+    with the needle wherever it is. A workshop design reaching Y 124.6 mm
+    passed the 80 x 130 hoop check and failed on a machine that travels
+    Y 0..120 (run of 2026-09-29).
+    """
+    bounds = bounds or result.bounds
+    if machine is None or not bounds.is_valid:
+        return
+    eps = _BOUNDS_EPSILON_MM
+    outside = []
+    if bounds.min_x < machine.x_min - eps or bounds.max_x > machine.x_max + eps:
+        outside.append(f"X {bounds.min_x:.1f}..{bounds.max_x:.1f} mm "
+                       f"(machine X {machine.x_min:g}..{machine.x_max:g})")
+    if bounds.min_y < machine.y_min - eps or bounds.max_y > machine.y_max + eps:
+        outside.append(f"Y {bounds.min_y:.1f}..{bounds.max_y:.1f} mm "
+                       f"(machine Y {machine.y_min:g}..{machine.y_max:g})")
+    if outside:
+        result.diagnostics.append(Diagnostic(
+            "error", "DESIGN_OUTSIDE_MACHINE",
+            f"Design leaves this machine's travel: {', '.join(outside)}. "
+            "Klipper would stop the job (printer.cfg [stepper_x]/[stepper_y])",
+        ))
+
+
 def cap_diagnostics(result: AnalysisResult,
                     per_code: int = MAX_DIAGNOSTICS_PER_CODE) -> None:
     """Reduce per-code diagnostic spam to ``per_code`` entries + one summary.

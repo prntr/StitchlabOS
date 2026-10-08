@@ -23,6 +23,55 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Load release pins
+        run: |
+          set -euo pipefail
+          # Upstream commits this release ships (wissen D-072). Firmware, image
+          # modules and the Update Manager pins all read them from here.
+          PINS=stitchlabos/image/upstream-pins.conf
+          for key in KLIPPER_REF KATAPULT_REF MOONRAKER_REF MAINSAIL_CONFIG_REF; do
+            line="$(grep -E "^${key}=[0-9a-f]{40}$" "$PINS" || true)"
+            if [ -z "$line" ]; then
+              echo "::error::$PINS needs ${key}=<full 40-hex commit>"
+              exit 1
+            fi
+            echo "$line" | tee -a "$GITHUB_ENV"
+          done
+
+      - name: Check release tags of StitchLAB repos
+        run: |
+          set -euo pipefail
+          # The Update Manager shows stitchlabos-config and turtlestitch by their
+          # tags and (channel beta) offers only tagged commits. A release tags
+          # both with its own name at the commits this checkout pins. Manual
+          # builds only report what they find.
+          TAG=""
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG="${GITHUB_REF#refs/tags/}"; fi
+          FAILED=0
+          for sub in stitchlabos-config turtlestitch; do
+            pin="$(git -C "$sub" rev-parse HEAD)"
+            url="https://github.com/prntr/${sub}.git"
+            if [ -n "$TAG" ]; then
+              tagged="$(git ls-remote --tags "$url" "$TAG" | awk -v t="refs/tags/$TAG" \
+                '$2 == t "^{}" { peeled = $1 } $2 == t { plain = $1 } END { print (peeled != "" ? peeled : plain) }')"
+              if [ "$tagged" = "$pin" ]; then
+                echo "ok   prntr/$sub $TAG = $pin"
+              else
+                echo "::error::prntr/$sub has no tag $TAG on the pinned commit $pin (found: ${tagged:-none}). Tag it: git -C $sub tag -a $TAG $pin -m 'StitchLabOS $TAG' && git -C $sub push $url $TAG"
+                FAILED=1
+              fi
+            else
+              found="$(stitchlabos/scripts/ci/nearest-version-tag "$sub" "$url" "$pin")"
+              if [ -n "$found" ]; then
+                read -r found_tag _ found_distance <<< "$found"
+                echo "prntr/$sub $pin: nearest version tag $found_tag, $found_distance commits back"
+              else
+                echo "::warning::prntr/$sub $pin has no version tag within 200 commits; the Update Manager will show v0.0.0 for it"
+              fi
+            fi
+          done
+          exit "$FAILED"
+
       - name: Build SKR Pico firmware (Katapult + Klipper)
         run: |
           set -euo pipefail
@@ -50,8 +99,16 @@ jobs:
           }
 
           build_fw() {
-            local repo="$1" dir="$2" seed="$3"
-            git clone --depth=1 "$repo" "$dir"
+            local repo="$1" dir="$2" seed="$3" ref="$4"
+            # Blobless, not shallow: the firmware's version string is
+            # `git describe --tags`, and must equal the host Klipper's, which
+            # the image clones with its last release tag.
+            git clone --quiet --filter=blob:none "$repo" "$dir"
+            git -C "$dir" checkout --quiet "$ref"
+            # Same abbreviation as the image's Klipper clone (klipper module):
+            # git picks its length from the object count, which differs.
+            git -C "$dir" config core.abbrev 12
+            git -C "$dir" describe --tags --long --dirty --always
             cp "firmware/skr-pico/${seed}" "$dir/.config"
             make -C "$dir" olddefconfig
             assert_config "$dir/.config" "firmware/skr-pico/${seed}"
@@ -59,11 +116,11 @@ jobs:
           }
 
           # Katapult first: it owns 0x10000100 and hands over at 0x10004000.
-          build_fw https://github.com/Arksine/katapult.git katapult-build katapult.config
+          build_fw https://github.com/Arksine/katapult.git katapult-build katapult.config "$KATAPULT_REF"
           cp katapult-build/out/katapult.uf2 "$FW_OUT/"
 
           # Klipper for the Katapult layout — flashed over /dev/serial0.
-          build_fw https://github.com/Klipper3d/klipper.git klipper-build klipper.config
+          build_fw https://github.com/Klipper3d/klipper.git klipper-build klipper.config "$KLIPPER_REF"
           # With a bootloader offset Klipper's rp2040 Makefile builds only
           # klipper.bin; the uf2 rule exists but is not a default target.
           make -C klipper-build out/klipper.uf2
@@ -71,8 +128,8 @@ jobs:
           cp klipper-build/out/klipper.uf2 "$FW_OUT/"
           # The image installs host Klipper and Katapult's flashtool at exactly
           # these commits (Build image step), so host and MCU always match.
-          echo "KLIPPER_REF=$(git -C klipper-build rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "KATAPULT_REF=$(git -C katapult-build rev-parse HEAD)" >> "$GITHUB_ENV"
+          test "$(git -C klipper-build rev-parse HEAD)" = "$KLIPPER_REF"
+          test "$(git -C katapult-build rev-parse HEAD)" = "$KATAPULT_REF"
           echo "KLIPPER_FW_SHA=$(git -C klipper-build rev-parse --short HEAD)" >> "$GITHUB_ENV"
           echo "KATAPULT_FW_SHA=$(git -C katapult-build rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
@@ -140,16 +197,28 @@ jobs:
           # Full history is ~1.4 GB. Clone just deep enough to reach the pin from
           # origin/master, so the branch is visibly behind rather than diverged.
           DEPTH="$(( $(git -C "$SRC" rev-list --count "${REF}..origin/${BRANCH}") + 1 ))"
+          # The Update Manager names the version after the nearest version tag
+          # (v0.0.0-1 without one, image 20260927): ship that tag, deep enough
+          # to reach it. The release check above makes it the release's tag.
+          TAG_REFSPEC=()
+          FOUND="$(stitchlabos/scripts/ci/nearest-version-tag "$SRC" "$ORIGIN" "$REF")"
+          if [ -n "$FOUND" ]; then
+            read -r TS_TAG TS_TAG_COMMIT _ <<< "$FOUND"
+            git -C "$SRC" fetch --quiet --no-tags origin "+refs/tags/${TS_TAG}:refs/tags/${TS_TAG}"
+            TAG_DEPTH="$(( $(git -C "$SRC" rev-list --count "${TS_TAG_COMMIT}..origin/${BRANCH}") + 1 ))"
+            [ "$TAG_DEPTH" -le "$DEPTH" ] || DEPTH="$TAG_DEPTH"
+            TAG_REFSPEC=("+refs/tags/${TS_TAG}:refs/tags/${TS_TAG}")
+          fi
           rm -rf "$DEST"
           git init --quiet --initial-branch="$BRANCH" "$DEST"
           git -C "$DEST" fetch --quiet --no-tags --depth="$DEPTH" "file://${SRC}" \
-            "+refs/remotes/origin/${BRANCH}:refs/remotes/origin/${BRANCH}"
+            "+refs/remotes/origin/${BRANCH}:refs/remotes/origin/${BRANCH}" ${TAG_REFSPEC[@]+"${TAG_REFSPEC[@]}"}
           # -t: fetch only master later too; the other branches would pull the full history.
           git -C "$DEST" remote add -t "$BRANCH" origin "$ORIGIN"
           git -C "$DEST" checkout --quiet -B "$BRANCH" "$REF"
           git -C "$DEST" branch --quiet --set-upstream-to="origin/${BRANCH}" "$BRANCH"
           git -C "$DEST" status -sb | head -1
-          echo "TURTLESTITCH_SHA=$(git -C "$DEST" rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "TURTLESTITCH_SHA=$(git -C "$DEST" describe --tags --long --always --abbrev=8)" >> "$GITHUB_ENV"
 
       - name: Install build dependencies
         run: |
@@ -217,6 +286,8 @@ jobs:
             STITCHLABOS_CONFIG_REF="$STITCHLABOS_CONFIG_REF" \
             KLIPPER_REF="$KLIPPER_REF" \
             KATAPULT_REF="$KATAPULT_REF" \
+            MOONRAKER_REF="$MOONRAKER_REF" \
+            MAINSAIL_CONFIG_REF="$MAINSAIL_CONFIG_REF" \
             STITCHLABOS_VERSION="$VERSION" \
             bash -x "$GITHUB_WORKSPACE/CustomPiOS/src/build"
         timeout-minutes: 90
@@ -380,7 +451,7 @@ jobs:
 
             ### Included
 
-            - Klipper `${{ env.KLIPPER_FW_SHA }}` on the Pi and in the SKR Pico firmware (same commit); Moonraker master at build time
+            - Klipper `${{ env.KLIPPER_FW_SHA }}` on the Pi and in the SKR Pico firmware (same commit); Moonraker `${{ env.MOONRAKER_REF }}`. Both are pinned in the Update Manager to these commits (`stitchlabos/image/upstream-pins.conf`)
             - SKR Pico firmware, prebuilt: Katapult `${{ env.KATAPULT_FW_SHA }}` (bootloader and the Pi's flashtool) + matching Klipper
               (UART0 on GPIO0/GPIO1, 115200 baud, app at `0x10004000`)
             - Mainsail v2.17.0 + StitchLAB UI (WiFi Manager, Embroidery Panel, GCode Studio)

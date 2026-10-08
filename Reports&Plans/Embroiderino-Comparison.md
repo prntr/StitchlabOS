@@ -620,7 +620,7 @@ This section surveys other open-source DIY embroidery efforts to map the broader
 - Key insight: Universal motors can be driven with DC for smoother operation
 
 ### StitchLAB Files
-- [embroidery_macros.cfg](../stitchlabos/config/klipper/embroidery_macros.cfg)
+- [embroidery_macros.cfg](../stitchlabos-config/printer_data/config/embroidery_macros.cfg)
 - [EmbroideryControlPanel.vue](../mainsail/src/components/panels/EmbroideryControlPanel.vue)
 - [embroider.js](../turtlestitch/src/embroider.js)
 

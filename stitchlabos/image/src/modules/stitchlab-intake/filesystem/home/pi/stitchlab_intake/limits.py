@@ -13,15 +13,15 @@ MAX_LINE_LENGTH = 4096
 
 # --- Whitelisted standard G/M commands -----------------------------------
 #
-# Anything not in this set and not in EMBROIDERY_MACROS is collected as
-# "referenced unknown macro" and reported. Phase 3 will cross-check those
-# against Klipper's actual `gcode_macro` definitions.
+# A macro name in none of the tables below is collected as a "referenced
+# unknown macro" and checked against Klipper's `gcode_macro` list before a
+# job starts.
 
 ALLOWED_G_COMMANDS = frozenset({
     "G0", "G1",          # linear moves
     "G2", "G3",          # arcs (flattened by parser)
     "G4",                # dwell
-    "G20", "G21",        # units
+    "G21",               # millimetres (Klipper rejects G20; see parser)
     "G90", "G91",        # absolute / relative
     "G92",               # set position
 })
@@ -30,13 +30,36 @@ ALLOWED_M_COMMANDS = frozenset({
     "M400",              # wait for moves to complete
 })
 
+# --- Commands of the StitchLAB G-code contract ---------------------------
+#
+# The machine side defines these as macros in embroidery_macros.cfg (beta6
+# contract between the machine config, the producers and this intake).
+# Klipper parses "M00" as its own command, not as "M0", so both are listed.
+# The machine starts every job itself (SDCARD_PRINT_FILE -> _STITCH_JOB_START:
+# needle up, G90, G92 Z0, G1 F<job_feedrate>).
+
+END_COMMANDS = frozenset({"M2", "M30"})            # end of job: needle up, M400
+COLOR_CHANGE_COMMANDS = frozenset({                # pause in place, needle up
+    "M0", "M00",                                   # Ink/Stitch writes M00
+    "M600",                                        # filament/thread change
+    "COLOR_CHANGE",                                # TurtleStitch writes it
+})
+
+# Needle and homing macros of the embroidery panel. The machine refuses each
+# of them while a job prints, which stops the job; producers must not write
+# them (beta6 contract). In a job a stitch is a Z step of +5.
+NEEDLE_MACROS = frozenset({
+    "NEEDLE_TOGGLE", "STITCH", "LOCK_STITCH", "NEEDLE_ADJUST",
+    "ZERO_NEEDLE_POSITION", "EMBROIDERY_HOME",
+})
+
 # --- Blocked commands (hard errors) --------------------------------------
 
 BLOCKED_COMMANDS = frozenset({
     "M112",                                        # emergency stop
     "M104", "M109", "M140", "M190",                # hotend / bed temp
     "M18", "M84",                                  # steppers off
-    "G28",                                         # homing inside job
+    "G28",                                         # homing: refused during a job
     "SAVE_CONFIG", "RUN_SHELL_COMMAND",            # config / shell
 })
 
@@ -46,23 +69,20 @@ WARNED_COMMANDS = frozenset({
     "M117", "RESPOND",                             # display / log
 })
 
-# --- Embroidery macros known by name -------------------------------------
-#
-# Listed here so they are *not* flagged as unknown. Whether they are
-# actually defined in the running Klipper config is checked in Phase 3.
-
-EMBROIDERY_MACROS = frozenset({
-    "STITCH", "LOCK_STITCH",
-    "NEEDLE_UP", "NEEDLE_DOWN", "NEEDLE_TOGGLE",
-    "TRIM", "COLOR_CHANGE", "STOP_FOR_COLOR_CHANGE",
-    "PEN_UP", "PEN_DOWN",
-})
-
 # --- Stick-specific thresholds -------------------------------------------
 
 MIN_FEEDRATE = 1.0                # mm/min — F0 is an error
 MAX_FEEDRATE = 60000.0            # mm/min — F over this is an error
-LONG_JUMP_MM = 30.0               # travel without stitching above this -> trim suggestion
+LONG_JUMP_MM = 30.0               # thread between two stitches above this -> trim suggestion
+
+# --- Needle model --------------------------------------------------------
+#
+# Z is the handwheel: one turn = NEEDLE_PERIOD_MM = one stitch, needle up at
+# multiples of it (embroidery_macros.cfg, beta6 contract "one stitch = Z +5").
+# The tolerance is the needle-up window NEEDLE_TOGGLE uses (z mod 5 < 0.5).
+
+NEEDLE_PERIOD_MM = 5.0
+NEEDLE_UP_TOLERANCE_MM = 0.5
 
 # Stitch density: warn when more than N stitches fall into a circle of
 # radius R mm. Tuned conservatively; refined once we have real fixtures.

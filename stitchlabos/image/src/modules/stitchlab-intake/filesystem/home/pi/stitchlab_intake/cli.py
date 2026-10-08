@@ -83,6 +83,20 @@ def _placement_from_args(args: argparse.Namespace,
     return placement
 
 
+def _machine_from_args(args: argparse.Namespace) -> Optional[checks.MachineLimits]:
+    raw = getattr(args, "machine_limits_json", None)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid --machine-limits-json: {exc}") from exc
+    machine = checks.MachineLimits.from_dict(data)
+    if machine is None:
+        raise ValueError('--machine-limits-json must be {"x": [min, max], "y": [min, max]}')
+    return machine
+
+
 def _progress(args: argparse.Namespace, fraction: float, stage: str) -> None:
     if not getattr(args, "worker_mode", False):
         return
@@ -115,8 +129,15 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 3
 
+    try:
+        machine = _machine_from_args(args)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
     bounds_for_check = checks.placement_adjusted_bounds(result.bounds, hoop, placement)
     checks.check_hoop_bounds(result, hoop, bounds=bounds_for_check)
+    checks.check_machine_bounds(result, machine, bounds=bounds_for_check)
     checks.cap_diagnostics(result)
     _progress(args, 0.5, "checks")
 
@@ -137,7 +158,9 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
             placement=placement,
         )
 
-    output = result_to_json(result, placement=placement, **extras)
+    output = result_to_json(result, placement=placement,
+                            machine_limits=machine.as_dict() if machine else None,
+                            **extras)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as fh:
             fh.write(output)
@@ -204,6 +227,9 @@ def _add_hoop_args(p: argparse.ArgumentParser) -> None:
                    help="Emit PROGRESS lines on stderr for the Moonraker worker")
     p.add_argument("--placement-json", default=None,
                    help="JSON placement object for preview key and rendering")
+    p.add_argument("--machine-limits-json", default=None,
+                   help='Machine XY travel {"x": [min, max], "y": [min, max]} '
+                        "from Klipper's config; omit to skip the machine check")
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -58,10 +58,11 @@ def test_no_xy_geometry():
     assert not r.bounds.is_valid
 
 
-def test_inch_units_warning_and_conversion():
+def test_inch_units_block_the_job_but_bounds_convert():
     r = parse_file(fx("inch_units.gcode"))
-    # Inch mode warning fires, but file itself is otherwise valid.
+    # Klipper answers G20 with an error that ends the job.
     assert "UNITS_INCH" in codes(r)
+    assert r.status == "blocked"
     # Bounds get normalised to mm: 1 inch = 25.4 mm.
     assert r.bounds.width == pytest.approx(25.4)
     assert r.bounds.height == pytest.approx(25.4)
@@ -70,12 +71,16 @@ def test_inch_units_warning_and_conversion():
     assert r.units_explicit is True
 
 
-def test_inkstitch_macros_collected_and_color_change_counted():
+def test_macro_style_file_is_blocked_and_its_colour_change_counted():
+    # The old macro-per-stitch style: STITCH is a panel macro the machine
+    # refuses during a job; TRIM is no machine macro and is checked against
+    # Klipper; COLOR_CHANGE is a contract command.
     r = parse_file(fx("inkstitch_like.gcode"))
     assert "UNTERMINATED_PAREN" not in codes(r)
     assert r.detected_origin == "inkstitch"
-    # STITCH/TRIM/COLOR_CHANGE are known embroidery macros, not "unknown".
-    assert r.referenced_unknown_macros == set()
+    assert "NEEDLE_MACRO_IN_JOB" in codes(r)
+    assert r.status == "blocked"
+    assert r.referenced_unknown_macros == {"TRIM"}
     assert r.stats.color_changes == 1
 
 
@@ -85,10 +90,12 @@ def test_unknown_macros_are_recorded():
     assert "ANOTHER_THING" in r.referenced_unknown_macros
 
 
-def test_long_jumps_emit_warning_and_increment_counter():
+def test_long_thread_between_stitches_warns():
     r = parse_file(fx("long_jumps.gcode"))
     assert "LONG_JUMP" in codes(r)
-    assert r.stats.long_jump_count >= 2
+    assert r.stats.long_jump_count == 2
+    assert r.stats.stitch_count == 4
+    assert r.stats.jump_count == 2
 
 
 def test_units_not_declared(tmp_path):
@@ -140,8 +147,9 @@ def test_feedrate_missing_only_warns_once(tmp_path):
     p = tmp_path / "no_feed.gcode"
     p.write_text("G21\nG90\nG1 X1 Y1\nG1 X2 Y2\nG1 X3 Y3\n")
     r = parse_file(str(p))
-    feed_warnings = [d for d in r.diagnostics if d.code == "FEEDRATE_MISSING"]
-    assert len(feed_warnings) == 1
+    feed_notes = [d for d in r.diagnostics if d.code == "FEEDRATE_MISSING"]
+    assert len(feed_notes) == 1
+    assert feed_notes[0].severity == "info"     # the machine's job start sets F
 
 
 def test_decimal_comma_normalised(tmp_path):

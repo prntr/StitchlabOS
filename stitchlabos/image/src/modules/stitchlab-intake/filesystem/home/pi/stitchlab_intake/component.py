@@ -15,6 +15,12 @@ Caches live next to the user's gcodes:
 The digests are sha1[:16] of the full analysis_key / preview_key strings.
 Full keys are stored *inside* the JSON so a digest collision (unlikely)
 is detectable rather than silently served.
+
+Before a file is hashed, its ``(...)`` comments are rewritten in place as
+``;`` comments (Klipper has none, so ``G90 (...)`` never ran). The
+analysis_key therefore always describes the bytes Klipper will read; the
+rewrite changes the file's sha256, and the upload event it causes finds
+that analysis already cached.
 """
 
 from __future__ import annotations
@@ -30,6 +36,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+from .checks import MachineLimits
+from .parser import normalise_paren_comments, sniff_encoding, split_line
 from .report import DEFAULT_PLACEMENT
 from .version import CHECKER_VERSION
 
@@ -77,6 +85,10 @@ class Adapter:
     query_klippy_macros: Callable[[], Awaitable[Optional[set[str]]]]
     is_printing: Callable[[], bool]
     emit_event: Callable[[str, dict], None]
+    # Klipper's ``configfile.settings`` (None while Klippy is not ready).
+    # Optional so an older Moonraker wrapper keeps working; without it the
+    # machine travel check is skipped and only the hoop is checked.
+    query_klippy_settings: Optional[Callable[[], Awaitable[Optional[dict]]]] = None
 
 
 @dataclass
@@ -97,6 +109,49 @@ def _sha256_of_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _normalise_paren_comments_in_place(path: Path, scratch_dir: Path) -> int:
+    """Rewrite ``(...)`` comments in ``path`` as ``;`` comments; return lines changed.
+
+    Klipper has no parenthesis comments: Ink/Stitch's
+    ``G90 (use absolute coordinates)`` reaches it as the unknown command
+    "G90 (" and never runs. The rewrite keeps the line count, the line
+    endings and a BOM, and replaces the file atomically, so a job already
+    reading the old file keeps its copy. Files without "(", files that are
+    not UTF-8, files with an unterminated "(" and files that cannot be
+    written stay untouched; the analysis then reports why.
+    """
+    with open(path, "rb") as fh:
+        if not any(b"(" in chunk for chunk in iter(lambda: fh.read(1 << 20), b"")):
+            return 0
+    encoding, _, problem = sniff_encoding(str(path))
+    if problem is not None or encoding not in ("utf-8", "utf-8-sig"):
+        return 0
+    tmp = scratch_dir / f".{path.name}.{uuid.uuid4().hex[:8]}.normalise.tmp"
+    changed = 0
+    try:
+        with open(path, "r", encoding=encoding, newline="") as src, \
+                open(tmp, "w", encoding=encoding, newline="") as dst:
+            for raw in src:
+                body = raw.rstrip("\r\n")
+                rewritten = normalise_paren_comments(body)
+                if rewritten is None:
+                    if "(" in body and split_line(body)[3]:
+                        return 0  # unterminated "(": leave the file as it is
+                    dst.write(raw)
+                    continue
+                changed += 1
+                dst.write(rewritten + raw[len(body):])
+        if changed:
+            shutil.copymode(path, tmp)
+            os.replace(tmp, path)
+    except (OSError, UnicodeDecodeError):
+        log.exception("intake: could not normalise comments in %s", path)
+        return 0
+    finally:
+        tmp.unlink(missing_ok=True)
+    return changed
+
+
 def _digest(key: str) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
@@ -107,6 +162,17 @@ def _meta_path(root: Path, basename: str, analysis_digest: str) -> Path:
 
 def _thumb_path(root: Path, basename: str, preview_digest: str) -> Path:
     return root / THUMB_SUBDIR / f"{basename}.{preview_digest}.png"
+
+
+def _same_machine(report: dict, machine: Optional[MachineLimits]) -> bool:
+    """Whether a cached report was checked against these machine limits.
+
+    Unknown limits (Klippy not ready) accept any cached report: the next
+    analysis with Klippy up re-checks it.
+    """
+    if machine is None:
+        return True
+    return MachineLimits.from_dict(report.get("machine_limits")) == machine
 
 
 def _normalise_placement(placement: Optional[dict],
@@ -255,6 +321,7 @@ class IntakeCore:
         """
         placement = _normalise_placement(placement, hoop_id)
         hoop_id = (placement or {}).get("hoop_id") or hoop_id or self.cfg.default_hoop
+        machine = await self._machine_limits()
         cached = await self._load_cached_meta(filename)
         if cached is not None and placement is not None:
             cached_raw_placement = cached.get("placement") or {}
@@ -263,10 +330,13 @@ class IntakeCore:
             )
             if cached_placement != placement:
                 cached = None
+        if cached is not None and not _same_machine(cached, machine):
+            cached = None
         if cached is None:
             cached = await self._run_analysis(filename, hoop_id=hoop_id,
                                               timeout=self.cfg.prepare_timeout,
-                                              placement=placement)
+                                              placement=placement,
+                                              machine=machine)
         macros = await self._macro_diagnostic(cached.get("referenced_unknown_macros") or [])
         report = dict(cached)
         report["filename"] = filename
@@ -290,6 +360,7 @@ class IntakeCore:
                     report = await self._run_analysis(
                         task.filename, hoop_id=task.hoop_id,
                         timeout=self.cfg.analyze_timeout,
+                        machine=await self._machine_limits(),
                     )
                     self._emit(task.filename, report.get("status", "unknown"),
                                analysis_key=report.get("analysis_key"))
@@ -310,19 +381,24 @@ class IntakeCore:
 
     async def _run_analysis(self, filename: str, hoop_id: Optional[str],
                             timeout: float,
-                            placement: Optional[dict] = None) -> dict:
+                            placement: Optional[dict] = None,
+                            machine: Optional[MachineLimits] = None) -> dict:
         gcode_path = self._resolve(filename)
         if not gcode_path.is_file():
             raise FileNotFoundError(filename)
+
+        meta_root = self.cfg.gcodes_root / META_SUBDIR
+        thumb_root = self.cfg.gcodes_root / THUMB_SUBDIR
+        meta_root.mkdir(parents=True, exist_ok=True)
+        thumb_root.mkdir(parents=True, exist_ok=True)
+        # First, so the key below hashes what Klipper will run.
+        normalised = await asyncio.get_running_loop().run_in_executor(
+            None, _normalise_paren_comments_in_place, gcode_path, meta_root)
 
         sha = await self._file_sha256(gcode_path)
         analysis_key = f"{sha}:{CHECKER_VERSION}"
         analysis_digest = _digest(analysis_key)
         basename = gcode_path.name
-        meta_root = self.cfg.gcodes_root / META_SUBDIR
-        thumb_root = self.cfg.gcodes_root / THUMB_SUBDIR
-        meta_root.mkdir(parents=True, exist_ok=True)
-        thumb_root.mkdir(parents=True, exist_ok=True)
 
         meta_target = _meta_path(self.cfg.gcodes_root, basename, analysis_digest)
         placement = _normalise_placement(placement, hoop_id)
@@ -338,6 +414,7 @@ class IntakeCore:
                             (existing.get("placement") or {}).get("hoop_id"),
                         ) == placement
                     )
+                    and _same_machine(existing, machine)
                 ):
                     return existing
             except (OSError, ValueError):
@@ -377,6 +454,8 @@ class IntakeCore:
                 cli_args += ["--hoop", str(placement["hoop_id"])]
         elif hoop_id:
             cli_args += ["--hoop", hoop_id]
+        if machine is not None:
+            cli_args += ["--machine-limits-json", json.dumps(machine.as_dict())]
 
         try:
             result = await self.adapter.run_cli(cli_args, timeout)
@@ -405,6 +484,12 @@ class IntakeCore:
                     "height": cli_thumb.get("height", self.cfg.thumbnail_size),
                 }
 
+            if normalised:
+                report.setdefault("info", []).append({
+                    "severity": "info", "code": "PAREN_COMMENTS_NORMALISED",
+                    "message": f"{normalised} line(s) with (...) comments were "
+                               "rewritten as ';' comments so Klipper runs them",
+                })
             tmp_meta.replace(meta_target)
             # Best-effort write-back with possibly updated thumbnail entry.
             meta_target.write_text(json.dumps(report, indent=2, sort_keys=False))
@@ -413,6 +498,19 @@ class IntakeCore:
             # Gone after a successful run; left over when the CLI failed.
             tmp_meta.unlink(missing_ok=True)
             tmp_thumb.unlink(missing_ok=True)
+
+    # --- machine ---------------------------------------------------------
+
+    async def _machine_limits(self) -> Optional[MachineLimits]:
+        query = self.adapter.query_klippy_settings
+        if query is None:
+            return None
+        try:
+            settings = await query()
+        except Exception:  # noqa: BLE001
+            log.exception("intake: Klipper settings query failed")
+            return None
+        return MachineLimits.from_klipper_settings(settings)
 
     # --- macros ----------------------------------------------------------
 

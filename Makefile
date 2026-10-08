@@ -1,5 +1,5 @@
 # Agent-Kontrakt -- siehe ~/Code/_std/AGENTS.base.md
-.PHONY: setup dev sim test test-intake test-pico test-wifi test-jogd test-image lint check status help
+.PHONY: setup dev sim test test-intake test-pico test-wifi test-jogd test-image klipper-drift lint check status help
 .DEFAULT_GOAL := help
 
 # Meta-Repo fuer StitchLabOS: ein Raspberry-Pi-Image, das Klipper, Moonraker,
@@ -48,9 +48,13 @@ test-jogd:  ## Tests des live_jogd-Daemons (pytest in uv, ohne Dongle)
 	  --with-requirements filesystem/home/pi/live_jogd/requirements.txt \
 	  pytest -q -p no:cacheprovider tests
 
-test-image:  ## Tests der Skripte des stitchlabos-Moduls (pytest in uv, ohne Pi)
-	cd stitchlabos/image/src/modules/stitchlabos && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 \
-	  --with pytest pytest -q -p no:cacheprovider tests
+test-image:  ## Tests der Image-Skripte (stitchlabos- und klipper-Modul, Drift-Auswertung; pytest in uv, ohne Pi, ohne Netz)
+	cd stitchlabos && PYTHONDONTWRITEBYTECODE=1 uv run --no-project --python 3.13 \
+	  --with pytest pytest -q -p no:cacheprovider image/src/modules/stitchlabos/tests \
+	  image/src/modules/klipper/tests drift/tests
+
+klipper-drift:  ## Klipper-Drift: unsere Configs und Beispieljobs am Pin und an Upstream-master (Docker, Netz; Bericht in .local/klipper-drift/)
+	@stitchlabos/drift/run.sh
 
 lint:    ## Mainsail-Linter + tote Verweise in der Doku
 	cd mainsail && npm run lint

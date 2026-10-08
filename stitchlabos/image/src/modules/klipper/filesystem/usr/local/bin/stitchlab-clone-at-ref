@@ -10,6 +10,12 @@
 # update_manager rejects a detached HEAD or a diverged branch. The clone
 # starts shallow and deepens only until REF is reachable, so a REF a few
 # commits behind the branch tip costs a few commits, not the full history.
+#
+# Then it deepens until the newest version tag that REF contains is local
+# and fetches that one tag. Moonraker's update_manager shows
+# `git describe --tags`; without a reachable tag every repo read
+# "v0.0.0-1" (image 20260927). Later tags on BRANCH arrive with Moonraker's
+# own fetches. A repo without version tags is cloned anyway, with a warning.
 set -euo pipefail
 
 if [ "$#" -ne 4 ]; then
@@ -22,6 +28,9 @@ url=$1 branch=$2 ref=$3 dest=$4
 # commits behind the tip. Give up after 1000 rather than fetching all of a
 # large history for a commit that is not there.
 max_deepen=20
+# The last release tag can lie further back (Klipper: 786 commits from
+# v0.13.0 to the beta5 pin). Stop after 2000 commits.
+max_tag_deepen=40
 
 git clone --depth=1 --branch "$branch" "$url" "$dest"
 cd "$dest"
@@ -36,3 +45,47 @@ while ! git merge-base --is-ancestor "$ref" "origin/$branch" 2>/dev/null; do
 done
 git reset -q --hard "$ref"
 echo "$dest: $branch at $(git rev-parse --short HEAD) ($(git rev-list --count HEAD.."origin/$branch") behind origin/$branch)"
+
+# "<commit> <tag>" for each tag whose name Moonraker reads as a version
+# (vX.Y.Z, optionally -alpha/-beta/-rc N); annotated tags by their commit.
+version_tags() {
+    git ls-remote --tags origin | awk '
+        { name = $2; sub("^refs/tags/", "", name) }
+        name ~ /\^\{\}$/ { sub(/\^\{\}$/, "", name); peeled[name] = $1; next }
+        { plain[name] = $1 }
+        END { for (t in plain) print ((t in peeled) ? peeled[t] : plain[t]), t }' |
+        grep -E ' v?[0-9]+(\.[0-9]+)*([-_.]?(a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?$' || true
+}
+
+# The version tag nearest to REF among those already local, or nothing.
+nearest_local_tag() {
+    local commit tag n best="" best_n=""
+    while read -r commit tag; do
+        [ -n "$commit" ] || continue
+        git merge-base --is-ancestor "$commit" "$ref" 2>/dev/null || continue
+        n=$(git rev-list --count "$commit..$ref")
+        if [ -z "$best_n" ] || [ "$n" -lt "$best_n" ]; then
+            best=$tag best_n=$n
+        fi
+    done <<< "$1"
+    printf '%s' "$best"
+}
+
+tags="$(version_tags)"
+if [ -z "$tags" ]; then
+    echo "WARNING: $url has no version tags; update_manager will show v0.0.0 for $dest" >&2
+    exit 0
+fi
+tag_deepened=0
+tag="$(nearest_local_tag "$tags")"
+while [ -z "$tag" ]; do
+    if [ "$(git rev-parse --is-shallow-repository)" != "true" ] || [ "$tag_deepened" -ge "$max_tag_deepen" ]; then
+        echo "WARNING: no version tag of $url within $((tag_deepened * 50)) commits of $ref; update_manager will show v0.0.0 for $dest" >&2
+        exit 0
+    fi
+    git fetch -q --deepen=50 origin "$branch"
+    tag_deepened=$((tag_deepened + 1))
+    tag="$(nearest_local_tag "$tags")"
+done
+git fetch -q --no-tags origin "refs/tags/$tag:refs/tags/$tag"
+echo "$dest: version $(git describe --tags --long --abbrev=8 "$ref")"
