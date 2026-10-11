@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).parent.parent / "filesystem/usr/local/sbin/stitchlab-first-boot-name"
+RENAME = Path(__file__).parent.parent / "filesystem/usr/local/sbin/stitchlab-rename"
 
 KEYFILE = """[connection]
 id=AccessPopup
@@ -41,7 +42,8 @@ def make_root(tmp_path, hostname="stitchlab", ssid="Stitchlab",
 
 
 def run(root):
-    result = subprocess.run(["bash", str(SCRIPT)], env={**os.environ, "STITCHLAB_ROOT": str(root)},
+    env = {**os.environ, "STITCHLAB_ROOT": str(root), "STITCHLAB_RENAME": str(RENAME)}
+    result = subprocess.run(["bash", str(SCRIPT)], env=env,
                             capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     return result.stdout

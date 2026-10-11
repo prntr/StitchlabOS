@@ -1,0 +1,52 @@
+#!/bin/bash
+# stitchlab-rename NAME — give the machine a new name everywhere it lives.
+#
+# hostnamectl alone changes the hostname but leaves /etc/hosts and Avahi on
+# the old name: every sudo then warned "unable to resolve host", and the
+# machine kept announcing its old .local name until Avahi restarted
+# (stitchlabdev, 2026-10-11). This writes /etc/hostname, sets the running
+# hostname, rewrites the 127.0.1.1 line of /etc/hosts and restarts Avahi if
+# it runs. stitchlab-first-boot-name uses it for the name it derives from
+# the board, before Avahi starts.
+#
+#   sudo stitchlab-rename stitchlab-03
+
+set -euo pipefail
+
+ROOT="${STITCHLAB_ROOT:-}"   # tests point this at a fake root
+
+fail() { echo "stitchlab-rename: $*" >&2; exit 1; }
+
+name="${1:-}"
+# One lower-case DNS label (RFC 1123): what Avahi and DHCP pass on unchanged.
+if ! [[ "$name" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+    echo "usage: sudo stitchlab-rename NAME" >&2
+    fail "'$name' is not a valid name: lower-case letters, digits and '-', at most 63 characters, not starting or ending with '-'"
+fi
+if [ -z "$ROOT" ] && [ "$(id -u)" -ne 0 ]; then
+    fail "needs root: sudo stitchlab-rename $name"
+fi
+
+printf '%s\n' "$name" > "$ROOT/etc/hostname"
+
+# Rewritten in place to keep the file's owner and mode; same as rewrite() in
+# stitchlab-first-boot-name.
+hosts="$ROOT/etc/hosts"
+if grep -qE '^127\.0\.1\.1[[:space:]]' "$hosts" 2>/dev/null; then
+    tmp="$(mktemp)"
+    awk -v name="$name" '/^127\.0\.1\.1[ \t]/ { print "127.0.1.1\t" name; next } { print }' \
+        "$hosts" > "$tmp"
+    cat "$tmp" > "$hosts"
+    rm -f "$tmp"
+else
+    printf '127.0.1.1\t%s\n' "$name" >> "$hosts"
+fi
+
+if [ -z "$ROOT" ]; then
+    hostname "$name"
+    if systemctl is-active --quiet avahi-daemon; then
+        systemctl restart avahi-daemon
+    fi
+fi
+
+echo "stitchlab-rename: hostname set to $name"

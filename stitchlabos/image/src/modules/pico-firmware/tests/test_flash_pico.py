@@ -153,3 +153,61 @@ def test_flash_mode_only_paths_fail_without_drive(tmp_path, mode):
     assert result.returncode != 0
     assert "BOOTSEL" not in result.stdout
     assert "No RPI-RP2 drive found" in result.stderr
+
+
+# --- the closing MCU check ----------------------------------------------------
+
+VERIFY = r"""
+source "$SCRIPT"
+slept=0
+# Restarting Klipper rolls its log over (ROLLOVER=1), as Klippy does at start.
+sudo() {
+    if [ "$*" = "systemctl restart klipper" ] && [ "$ROLLOVER" = 1 ]; then
+        mv "$KLIPPY_LOG" "$KLIPPY_LOG.1"
+        echo "Starting Klippy..." > "$KLIPPY_LOG"
+    fi
+}
+# Klippy writes the MCU line after APPEAR_AT sleeps of 2 s; 0 means never.
+sleep() {
+    slept=$((slept + 1))
+    if [ "$slept" -eq "$APPEAR_AT" ]; then
+        echo "MCU 'mcu' config: ADC_MAX=4095 MCU=rp2040" >> "$KLIPPY_LOG"
+    fi
+}
+rc=0; verify_mcu || rc=$?; echo "rc=$rc"
+"""
+
+
+def verify(tmp_path, *, rollover, appear_at, old_mcu_line=False):
+    log = tmp_path / "klippy.log"
+    log.write_text("Starting Klippy...\n" + ("MCU 'mcu' config: old run\n" if old_mcu_line else ""))
+    env = {**os.environ, "SCRIPT": str(SCRIPT), "PICO_KLIPPY_LOG": str(log),
+           "ROLLOVER": "1" if rollover else "0", "APPEAR_AT": str(appear_at)}
+    result = subprocess.run([BASH, "-c", VERIFY], capture_output=True, text=True,
+                            env=env, timeout=20)
+    assert "ERROR:" not in result.stderr, result.stderr
+    return result
+
+
+def test_mcu_that_connects_after_ten_seconds_is_confirmed(tmp_path):
+    # stitchlabdev, 2026-10-11: the fixed 8 s wait reported this as a failure.
+    result = verify(tmp_path, rollover=True, appear_at=5)
+    assert result.stdout.strip().endswith("rc=0")
+    assert "MCU connected after 10s" in result.stdout
+
+
+def test_mcu_that_never_connects_fails_after_the_wait(tmp_path):
+    result = verify(tmp_path, rollover=True, appear_at=0)
+    assert result.stdout.strip().endswith("rc=1")
+    assert "MCU not confirmed within 30s" in result.stdout
+
+
+def test_an_mcu_line_from_before_the_restart_does_not_count(tmp_path):
+    result = verify(tmp_path, rollover=False, appear_at=0, old_mcu_line=True)
+    assert result.stdout.strip().endswith("rc=1")
+
+
+def test_a_new_mcu_line_in_the_same_log_counts(tmp_path):
+    result = verify(tmp_path, rollover=False, appear_at=2, old_mcu_line=True)
+    assert result.stdout.strip().endswith("rc=0")
+    assert "after 4s" in result.stdout
