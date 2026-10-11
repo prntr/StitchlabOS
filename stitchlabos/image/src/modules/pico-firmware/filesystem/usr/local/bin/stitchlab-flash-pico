@@ -323,20 +323,46 @@ flash_via_uart() {
 }
 
 # --- Verification -----------------------------------------------------------
+# Klippy rolls its log over when it starts and then needs a few seconds to
+# connect to the MCU; on stitchlabdev (2026-10-11) it needed more than the
+# fixed 8 s this check used to wait, and the script reported a failure that
+# had not happened. Wait for an MCU line written after the restart instead.
+KLIPPY_LOG="${PICO_KLIPPY_LOG:-/home/pi/printer_data/logs/klippy.log}"
+VERIFY_WAIT="${VERIFY_WAIT:-30}"
+MCU_LINE="MCU 'mcu' config"
+
+# "<inode> <MCU lines>" of the log. A new inode means Klippy started a
+# fresh log; in the same file only an additional MCU line is new.
+klippy_log_state() {
+    local inode count
+    inode="$(ls -i "$KLIPPY_LOG" 2>/dev/null | awk '{print $1}' || true)"
+    # grep -c prints 0 and fails when nothing matches; the || stays inside,
+    # or the ERR trap reports the subshell's grep.
+    count="$(grep -c "$MCU_LINE" "$KLIPPY_LOG" 2>/dev/null || true)"
+    echo "${inode:-none} ${count:-0}"
+}
+
 verify_mcu() {
+    local before_inode before_count now_inode now_count waited=0
     say "Checking whether Klipper sees the MCU"
+    read -r before_inode before_count <<< "$(klippy_log_state)"
     sudo systemctl restart klipper
     KLIPPER_WAS_ACTIVE=0   # we just started it ourselves
-    sleep 8
+    info "Waiting up to ${VERIFY_WAIT}s for Klipper to configure the MCU ..."
 
-    local log="/home/pi/printer_data/logs/klippy.log"
-    if [ -f "$log" ] && tail -n 200 "$log" | grep -q "MCU 'mcu' config"; then
-        info "OK — MCU connected."
-        return 0
-    fi
+    while [ "$waited" -lt "$VERIFY_WAIT" ]; do
+        sleep 2
+        waited=$((waited + 2))
+        read -r now_inode now_count <<< "$(klippy_log_state)"
+        if { [ "$now_inode" != "$before_inode" ] && [ "$now_count" -gt 0 ]; } \
+            || [ "$now_count" -gt "$before_count" ]; then
+            info "OK — MCU connected after ${waited}s."
+            return 0
+        fi
+    done
 
-    printf '\n\033[33mMCU not confirmed yet.\033[0m Last lines of klippy.log:\n\n'
-    tail -n 15 "$log" 2>/dev/null || echo "  (no klippy.log)"
+    printf '\n\033[33mMCU not confirmed within %ss.\033[0m Last lines of klippy.log:\n\n' "$VERIFY_WAIT"
+    tail -n 15 "$KLIPPY_LOG" 2>/dev/null || echo "  (no klippy.log)"
     printf '\nSee docs/11-commissioning.md, section "The MCU does not answer".\n'
     return 1
 }
