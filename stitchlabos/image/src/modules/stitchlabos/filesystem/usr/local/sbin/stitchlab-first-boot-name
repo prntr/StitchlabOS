@@ -19,6 +19,7 @@ DEFAULT_HOSTNAME="stitchlab"
 DEFAULT_SSID="Stitchlab"
 AP_KEYFILE="$ROOT/etc/NetworkManager/system-connections/AccessPopup.nmconnection"
 MARKER="$ROOT/var/lib/stitchlabos/first-boot-name.done"
+RENAME="${STITCHLAB_RENAME:-/usr/local/sbin/stitchlab-rename}"   # tests point this at the repo copy
 
 log() { echo "stitchlab-first-boot-name: $*"; }
 
@@ -54,17 +55,8 @@ rename_host() {
         log "hostname '$current' was set elsewhere; leaving it"
         return
     fi
-    printf '%s\n' "$new" > "$ROOT/etc/hostname"
-    if grep -qE '^127\.0\.1\.1[[:space:]]' "$ROOT/etc/hosts" 2>/dev/null; then
-        rewrite "$ROOT/etc/hosts" -v name="$new" \
-            '/^127\.0\.1\.1[ \t]/ { print "127.0.1.1\t" name; next } { print }'
-    else
-        printf '127.0.1.1\t%s\n' "$new" >> "$ROOT/etc/hosts"
-    fi
-    if [ -z "$ROOT" ]; then
-        hostname "$new"
-    fi
-    log "hostname set to $new"
+    # One owner for "the name, everywhere": hostname, /etc/hosts, Avahi.
+    "$RENAME" "$new"
 }
 
 rename_ap() {

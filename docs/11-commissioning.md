@@ -33,7 +33,10 @@ On this first boot the machine names itself after its board: hostname
 four hex digits of the Pi's serial number (`cat /proc/device-tree/serial-number`).
 Reflashing the same Pi gives the same name; write it on a label. A name set in
 Imager's customisation is kept. To number the machines of a workshop instead:
-`sudo hostnamectl set-hostname stitchlab-03`.
+`sudo stitchlab-rename stitchlab-03`. It also updates `/etc/hosts` and Avahi;
+`hostnamectl` alone leaves both on the old name, and `sudo` then warns
+`unable to resolve host` (images up to `20261008-4f44192` lack the helper: fix the
+`127.0.1.1` line of `/etc/hosts` and run `sudo systemctl restart avahi-daemon`).
 
 - **AP mode**: WiFi `Stitchlab-xxxx`, password `praxistest`, then
   http://stitchlab-xxxx.local (or http://192.168.50.5)
