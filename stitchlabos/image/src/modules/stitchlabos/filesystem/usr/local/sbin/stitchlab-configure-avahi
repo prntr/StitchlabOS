@@ -94,4 +94,4 @@ END {
 chmod --reference="$CONF" "$tmp" 2>/dev/null || chmod 0644 "$tmp"
 mv "$tmp" "$CONF"
 trap - EXIT
-echo "stitchlab-configure-avahi: $CONF on wlan0, IPv4 only"
+echo "stitchlab-configure-avahi: $CONF on wlan0 and eth0, reflector off, IPv4 only"
