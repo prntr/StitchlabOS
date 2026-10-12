@@ -20,19 +20,19 @@ def read(conf: Path) -> configparser.ConfigParser:
     return parser
 
 
-def test_stock_config_becomes_wlan0_and_ipv4_only(tmp_path):
+def test_stock_config_becomes_wlan0_eth0_and_ipv4_only(tmp_path):
     conf = tmp_path / "avahi-daemon.conf"
     shutil.copy(STOCK, conf)
     result = configure(conf)
     assert result.returncode == 0, result.stderr
     cfg = read(conf)
-    assert cfg["server"]["allow-interfaces"] == "wlan0"
+    assert cfg["server"]["allow-interfaces"] == "wlan0,eth0"
     assert cfg["server"]["use-ipv4"] == "yes"
     assert cfg["server"]["use-ipv6"] == "no"
     # use-ipv6=no alone still publishes the IPv6 address over IPv4.
     assert cfg["publish"]["publish-aaaa-on-ipv4"] == "no"
     assert cfg["publish"]["publish-a-on-ipv6"] == "no"
-    assert cfg["reflector"]["enable-reflector"] == "yes"
+    assert cfg["reflector"]["enable-reflector"] == "no"
     # Untouched lines stay, each key appears once.
     assert cfg["publish"]["publish-workstation"] == "no"
     assert cfg["wide-area"]["enable-wide-area"] == "yes"
@@ -54,7 +54,7 @@ def test_missing_keys_are_added_to_their_section(tmp_path):
     assert configure(conf).returncode == 0
     cfg = read(conf)
     assert cfg["server"]["use-ipv6"] == "no"
-    assert cfg["server"]["allow-interfaces"] == "wlan0"
+    assert cfg["server"]["allow-interfaces"] == "wlan0,eth0"
     assert cfg["publish"]["publish-aaaa-on-ipv4"] == "no"
 
 

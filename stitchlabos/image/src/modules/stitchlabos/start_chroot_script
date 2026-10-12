@@ -81,7 +81,8 @@ if ! grep -q '\[stitchlab_ws_tuning\]' /home/pi/printer_data/config/moonraker.co
     echo "websocket_ping_timeout: 25" >> /home/pi/printer_data/config/moonraker.conf
 fi
 
-# Avahi on wlan0 only (prevents mDNS issues in AP mode) and IPv4 only:
+# Avahi on wlan0 and eth0 with the reflector off (each network sees only the
+# address it can reach; see the script's header) and IPv4 only:
 # nginx and Moonraker serve IPv4 only, so an announced IPv6 address only
 # produced refused connections (workshop 2026-10-06). sshd is IPv4-only too
 # (etc/ssh/sshd_config.d/10-stitchlab-ipv4-only.conf, unpacked above).

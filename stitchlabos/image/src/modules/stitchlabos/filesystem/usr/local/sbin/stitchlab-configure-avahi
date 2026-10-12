@@ -1,5 +1,13 @@
 #!/bin/bash
-# stitchlab-configure-avahi — Avahi on wlan0, over IPv4 only.
+# stitchlab-configure-avahi — Avahi on Wi-Fi and Ethernet, over IPv4 only.
+#
+# Avahi used to run on wlan0 only, so a machine on a LAN cable could not be
+# found by its .local name (stitchlab07, 2026-10-12). It now runs on eth0
+# too, with the reflector off: the reflector relays records between the
+# interfaces, and clients of the machine's own access point then resolved
+# the name to its LAN address, which they cannot reach (the reason for the
+# wlan0-only rule, docs/runbooks/ap-troubleshooting.md). Without it each
+# network sees only the address it can reach.
 #
 # nginx (Mainsail, TurtleStitch) and Moonraker listen on IPv4 only. A
 # hotspot with an IPv6 uplink hands the Pi a global IPv6 address (workshop
@@ -23,9 +31,9 @@ fi
 
 # section.key=value; the value replaces a set or commented-out key in its
 # section, or is added at the end of the section.
-SETTINGS="server.allow-interfaces=wlan0 server.use-ipv4=yes server.use-ipv6=no"
+SETTINGS="server.allow-interfaces=wlan0,eth0 server.use-ipv4=yes server.use-ipv6=no"
 SETTINGS="$SETTINGS publish.publish-aaaa-on-ipv4=no publish.publish-a-on-ipv6=no"
-SETTINGS="$SETTINGS reflector.enable-reflector=yes"
+SETTINGS="$SETTINGS reflector.enable-reflector=no"
 
 tmp="$(mktemp "$CONF.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
