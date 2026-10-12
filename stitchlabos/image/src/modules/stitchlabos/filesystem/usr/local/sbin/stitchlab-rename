@@ -6,8 +6,9 @@
 # machine kept announcing its old .local name until Avahi restarted
 # (stitchlabdev, 2026-10-11). This writes /etc/hostname, sets the running
 # hostname, rewrites the 127.0.1.1 line of /etc/hosts and restarts Avahi if
-# it runs. stitchlab-first-boot-name uses it for the name it derives from
-# the board, before Avahi starts.
+# it runs, then gives the fallback access point the same name (below).
+# stitchlab-first-boot-name uses it for the name it derives from the board,
+# before Avahi and NetworkManager start.
 #
 #   sudo stitchlab-rename stitchlab-03
 
@@ -26,6 +27,11 @@ fi
 if [ -z "$ROOT" ] && [ "$(id -u)" -ne 0 ]; then
     fail "needs root: sudo stitchlab-rename $name"
 fi
+
+# The access point follows a rename only if it still carries a name the image
+# or this script gave it; read the old hostname before it is replaced.
+old_name="$(tr -d '[:space:]' < "$ROOT/etc/hostname" 2>/dev/null || true)"
+capitalise() { printf '%s' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')${1:1}"; }
 
 printf '%s\n' "$name" > "$ROOT/etc/hostname"
 
@@ -50,3 +56,38 @@ if [ -z "$ROOT" ]; then
 fi
 
 echo "stitchlab-rename: hostname set to $name"
+
+# The fallback access point follows the name, capitalised: stitchlab07 gives
+# Stitchlab07. stitchlab07 kept Stitchlab-51ad from its first boot (2026-10-12).
+# Only an SSID the image or this script chose changes: Stitchlab,
+# Stitchlab-<4 hex digits>, or the old name capitalised. One set by hand, in
+# Mainsail or with nmcli, stays.
+ap_keyfile="$ROOT/etc/NetworkManager/system-connections/AccessPopup.nmconnection"
+ssid="$(capitalise "$name")"
+current_ssid="$(sed -n 's/^ssid=//p' "$ap_keyfile" 2>/dev/null | head -n 1 || true)"
+ours=no
+if [[ "$current_ssid" =~ ^Stitchlab(-[0-9a-f]{4})?$ ]] \
+    || { [ -n "$old_name" ] && [ "$current_ssid" = "$(capitalise "$old_name")" ]; }; then
+    ours=yes
+fi
+if [ ! -f "$ap_keyfile" ]; then
+    echo "stitchlab-rename: no access point profile; nothing to rename"
+elif [ "$ours" = no ]; then
+    echo "stitchlab-rename: access point SSID was set by hand; leaving it"
+else
+    tmp="$(mktemp)"
+    awk -v old="ssid=$current_ssid" -v new="ssid=$ssid" '$0 == old { print new; next } { print }' \
+        "$ap_keyfile" > "$tmp"
+    cat "$tmp" > "$ap_keyfile"   # keeps the keyfile's 0600
+    rm -f "$tmp"
+    # On a running system NetworkManager rereads the profile, and a running
+    # access point restarts under the new name (its clients reconnect). On the
+    # first boot NetworkManager has not started yet and reads the file itself.
+    if [ -z "$ROOT" ] && systemctl is-active --quiet NetworkManager; then
+        nmcli connection reload
+        if nmcli -t -f NAME connection show --active | grep -qx AccessPopup; then
+            nmcli connection up AccessPopup >/dev/null
+        fi
+    fi
+    echo "stitchlab-rename: access point SSID set to $ssid"
+fi

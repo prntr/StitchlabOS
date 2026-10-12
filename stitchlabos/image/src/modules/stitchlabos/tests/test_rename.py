@@ -58,3 +58,59 @@ def test_without_root_it_asks_for_sudo(tmp_path):
                             capture_output=True, text=True, timeout=20)
     assert result.returncode != 0
     assert "needs root: sudo stitchlab-rename stitchlabdev" in result.stderr
+
+
+# --- the access point follows the name ----------------------------------------
+
+def with_ap(root, ssid):
+    keyfile = root / "etc/NetworkManager/system-connections/AccessPopup.nmconnection"
+    keyfile.parent.mkdir(parents=True)
+    keyfile.write_text(f"[connection]\nid=AccessPopup\n\n[wifi]\nmode=ap\nssid={ssid}\n\n"
+                       "[wifi-security]\npsk=praxistest\n")
+    keyfile.chmod(0o600)
+    return keyfile
+
+
+@pytest.mark.parametrize("name,ssid", [("stitchlab07", "Stitchlab07"), ("stitchlab-03", "Stitchlab-03")])
+def test_board_derived_ssid_follows_the_name(tmp_path, name, ssid):
+    # stitchlab07 kept "Stitchlab-51ad" after its rename (2026-10-12).
+    root = make_root(tmp_path)
+    keyfile = with_ap(root, "Stitchlab-51ad")
+    result = rename(root, name)
+    assert result.returncode == 0, result.stderr
+    assert f"\nssid={ssid}\n" in keyfile.read_text()
+    assert "psk=praxistest" in keyfile.read_text()
+    assert keyfile.stat().st_mode & 0o777 == 0o600
+    assert f"access point SSID set to {ssid}" in result.stdout
+
+
+def test_image_default_ssid_follows_the_name(tmp_path):
+    root = make_root(tmp_path)
+    keyfile = with_ap(root, "Stitchlab")
+    assert rename(root, "stitchlab07").returncode == 0
+    assert "\nssid=Stitchlab07\n" in keyfile.read_text()
+
+
+@pytest.mark.parametrize("ssid", ["Werkstatt-AP", "Stitchlab-Raum3", "Stitchlab07"])  # hostname is stitchlab-51ad
+def test_ssid_set_by_hand_stays(tmp_path, ssid):
+    root = make_root(tmp_path)
+    keyfile = with_ap(root, ssid)
+    result = rename(root, "stitchlab-03")
+    assert result.returncode == 0
+    assert f"\nssid={ssid}\n" in keyfile.read_text()
+    assert "set by hand; leaving it" in result.stdout
+
+
+def test_no_access_point_profile_is_fine(tmp_path):
+    root = make_root(tmp_path)
+    result = rename(root, "stitchlab07")
+    assert result.returncode == 0
+    assert "no access point profile" in result.stdout
+
+
+def test_a_second_rename_moves_the_ssid_again(tmp_path):
+    root = make_root(tmp_path)
+    keyfile = with_ap(root, "Stitchlab-51ad")
+    assert rename(root, "stitchlab07").returncode == 0
+    assert rename(root, "stitchlab-08").returncode == 0
+    assert "\nssid=Stitchlab-08\n" in keyfile.read_text()
