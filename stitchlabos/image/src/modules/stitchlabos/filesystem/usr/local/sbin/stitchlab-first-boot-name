@@ -48,15 +48,18 @@ rewrite() {
     rm -f "$tmp"
 }
 
-rename_host() {
-    local new="$1" current
+# The hostname and, with it, the access point (stitchlab-rename owns both).
+# A hostname set elsewhere stays; the access point still gets the board
+# suffix then, so two machines named in Imager do not share "Stitchlab".
+rename_host_or_ap() {
+    local suffix="$1" current
     current="$(tr -d '[:space:]' < "$ROOT/etc/hostname" 2>/dev/null || true)"
-    if [ "$current" != "$DEFAULT_HOSTNAME" ]; then
-        log "hostname '$current' was set elsewhere; leaving it"
+    if [ "$current" = "$DEFAULT_HOSTNAME" ]; then
+        "$RENAME" "$DEFAULT_HOSTNAME-$suffix"
         return
     fi
-    # One owner for "the name, everywhere": hostname, /etc/hosts, Avahi.
-    "$RENAME" "$new"
+    log "hostname '$current' was set elsewhere; leaving it"
+    rename_ap "$DEFAULT_SSID-$suffix"
 }
 
 rename_ap() {
@@ -75,8 +78,7 @@ if ! suffix="$(board_suffix)"; then
     exit 0
 fi
 
-rename_host "$DEFAULT_HOSTNAME-$suffix"
-rename_ap "$DEFAULT_SSID-$suffix"
+rename_host_or_ap "$suffix"
 
 mkdir -p "$(dirname "$MARKER")"
 touch "$MARKER"

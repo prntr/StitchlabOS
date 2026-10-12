@@ -33,17 +33,31 @@ On this first boot the machine names itself after its board: hostname
 four hex digits of the Pi's serial number (`cat /proc/device-tree/serial-number`).
 Reflashing the same Pi gives the same name; write it on a label. A name set in
 Imager's customisation is kept. To number the machines of a workshop instead:
-`sudo stitchlab-rename stitchlab-03`. It also updates `/etc/hosts` and Avahi;
-`hostnamectl` alone leaves both on the old name, and `sudo` then warns
-`unable to resolve host` (images up to `20261008-4f44192` lack the helper: fix the
-`127.0.1.1` line of `/etc/hosts` and run `sudo systemctl restart avahi-daemon`).
+`sudo stitchlab-rename stitchlab-03`. It also updates `/etc/hosts` and Avahi, and
+renames the access point to match (`Stitchlab-03`) unless its SSID was set by
+hand. `hostnamectl` alone leaves `/etc/hosts` and Avahi on the old name, and `sudo`
+then warns `unable to resolve host` (images up to `20261008-4f44192` lack the
+helper: fix the `127.0.1.1` line of `/etc/hosts` and run
+`sudo systemctl restart avahi-daemon`; up to `20261011-e803dbc` it leaves the
+access point's SSID as it was).
 
 - **AP mode**: WiFi `Stitchlab-xxxx`, password `praxistest`, then
   http://stitchlab-xxxx.local (or http://192.168.50.5)
 - **SSH**: `ssh pi@stitchlab-xxxx.local`, password `lab`
+- **On a LAN cable**: the machine is also reachable as `stitchlab-xxxx.local` from
+  the LAN (images after `20261011-e803dbc`; older ones only by address).
 
 Mainsail loads but reports **no MCU**. That is correct at this point and not a
 fault — step 3 fixes it.
+
+**Joining a Wi-Fi network does not need the MCU.** *Settings* (gear icon in the
+top bar) → *Wi-Fi* works while Mainsail reports no MCU: the Wi-Fi manager is a
+Moonraker component and does not depend on Klipper. Step 3 needs no internet
+either, so the order is free: join the workshop network first and do step 3 from
+there, or do step 3 over the access point and join a network afterwards. After
+joining, the access point goes away; connect the laptop to the same network and
+open `http://stitchlab-xxxx.local` (Android does not resolve `.local` names; use
+the address the router shows).
 
 ## 3. Bring up the SKR Pico
 

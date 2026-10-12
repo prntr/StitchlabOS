@@ -170,6 +170,14 @@ dns-sd -G v4 stitchlab.local
 ```
 
 **Pi-Side Avahi Config:**
+
+Images from `feat/cross-platform-stability` after `e803dbc` announce on `wlan0` and
+`eth0` with the reflector off (`stitchlab-configure-avahi`), so a machine on a LAN
+cable is reachable as `<name>.local` from the LAN too. If clients of the machine's
+own access point resolve the name to its LAN address, restrict Avahi to the AP
+interface as below; older images already run on `wlan0` only. Leave the reflector
+off: it is what relays the LAN address into the AP network.
+
 ```bash
 # Find which interface has the AP IP (usually `wlan0`, sometimes `uap0`)
 ip -4 -o addr show | grep '192.168.50.5'
@@ -184,9 +192,8 @@ grep -q '^allow-interfaces=' /etc/avahi/avahi-daemon.conf || sudo sed -i '/^use-
 # sudo sed -i 's/^deny-interfaces=.*/deny-interfaces=eth0/' /etc/avahi/avahi-daemon.conf || true
 # grep -q '^deny-interfaces=' /etc/avahi/avahi-daemon.conf || sudo sed -i '/^use-ipv6=yes/a deny-interfaces=eth0' /etc/avahi/avahi-daemon.conf
 
-# (Optional) Enable reflector for AP mode
-sudo sed -i 's/^#enable-reflector=no/enable-reflector=yes/' /etc/avahi/avahi-daemon.conf
-grep "enable-reflector" /etc/avahi/avahi-daemon.conf
+# Do not enable the reflector: it relays the LAN address into the AP network.
+grep "enable-reflector" /etc/avahi/avahi-daemon.conf   # expected: enable-reflector=no
 sudo systemctl restart avahi-daemon
 ```
 
