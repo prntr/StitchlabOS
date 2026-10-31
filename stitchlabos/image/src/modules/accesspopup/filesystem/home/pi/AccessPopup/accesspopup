@@ -229,9 +229,14 @@ start_ap()
 		#activating AP failed
 		#this may be because the AP device has been manually changed, ie wlan0 to wlan1
 		#issue with AP profile, delete and renew
+		# StitchLabOS: renew with the SSID and password the profile had, not
+		# the defaults above: each machine has its own SSID from its first
+		# boot (stitchlab-first-boot-name), and Mainsail can change both.
+		keep_ssid="$(nmcli -e no -g 802-11-wireless.ssid connection show "$ap_profile_name" 2>/dev/null)"
+		keep_pw="$(nmcli -s -e no -g 802-11-wireless-security.psk connection show "$ap_profile_name" 2>/dev/null)"
 		nmcli device down $wdev0
 		nmcli connection delete "$ap_profile_name"
-		ap_new_profile
+		ap_new_profile "$keep_ssid" "$keep_pw"
 		nmcli device up $wdev0
 		echo "The AccessPoint profile has been renewed due to an issue while activating it."
 	fi
@@ -297,7 +302,9 @@ nmcli connection reload
 ap_new_profile()
 {
 #Create a AP profile
-nmcli device wifi hotspot ifname $wdev0 con-name "$ap_profile_name" ssid "$ap_ssid" band bg channel 6 password "$ap_pw" >/dev/null 2>&1
+# StitchLabOS: $1/$2 keep a renewed profile's SSID and password
+local new_ssid="${1:-$ap_ssid}" new_pw="${2:-$ap_pw}"
+nmcli device wifi hotspot ifname $wdev0 con-name "$ap_profile_name" ssid "$new_ssid" band bg channel 6 password "$new_pw" >/dev/null 2>&1
 nmcli connection modify "$ap_profile_name" ipv4.method shared ipv4.addr "$ap_ip" ipv4.gateway "$ap_gate" 802-11-wireless-security.group "ccmp" 802-11-wireless-security.pairwise "ccmp" 802-11-wireless-security.proto "" >/dev/null 2>&1
 nmcli connection modify "$ap_profile_name" wifi.powersave disable
 ap_profile+="$ap_profile_name"

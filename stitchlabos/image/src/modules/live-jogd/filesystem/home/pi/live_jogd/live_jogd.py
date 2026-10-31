@@ -13,13 +13,18 @@ import signal
 import sys
 import time
 import json
-from typing import Optional, Set
+from typing import Optional, Set, Tuple
 
 import websockets
 from websockets.server import serve as ws_serve
 
 from serial_protocol import (
-    FrameParser, FrameBuilder, StatusFrame, JoystickFrame, HeartbeatFrame
+    FrameParser, FrameBuilder, StatusFrame, JoystickFrame, HeartbeatFrame,
+    ResponseFrame, parse_dongle_info, parse_dongle_status, parse_peer_list,
+    dongle_info_to_dict, dongle_status_to_dict, peer_info_to_dict,
+    MSG_TYPE_QUERY, MSG_TYPE_COMMAND, QUERY_INFO, QUERY_STATUS, QUERY_PEERS,
+    CMD_WIFI_ENABLE, CMD_ENTER_PAIRING, CMD_EXIT_PAIRING, CMD_CLEAR_PEERS,
+    RESP_OK,
 )
 from moonraker_client import MoonrakerClient
 import config
@@ -52,10 +57,13 @@ class LiveJogDaemon:
         # State tracking
         self.running = False
         self.last_frame_time = 0.0
+        self.last_active_frame_time = 0.0
         self.last_jog_time = 0.0
         self.last_z_time = 0.0
         self.last_status_time = 0.0
         self.status_seq = 0
+        self.link_timed_out = False
+        self.live_control_enabled = False
 
         # Current joystick state
         self.current_vx = 0.0
@@ -94,6 +102,12 @@ class LiveJogDaemon:
             "rssi": -50
         }
         self.peers = []
+        self.controller_type_overrides = {}
+
+        # One outstanding dongle query/command at a time; the read loop
+        # resolves the pending future when the matching response arrives.
+        self._dongle_lock = asyncio.Lock()
+        self._dongle_pending: Optional[Tuple[int, int, asyncio.Future]] = None
 
     async def start(self):
         """Start the daemon."""
@@ -158,49 +172,274 @@ class LiveJogDaemon:
             logger.error(f"Failed to open serial port: {e}")
             raise
 
+    # ==================== Controller Policy ====================
+
+    def _zero_motion_state(self):
+        """Clear any active controller motion state."""
+        self.current_vx = 0.0
+        self.current_vy = 0.0
+        self.current_deadman = False
+
+    def _normalise_controller_type(self, value) -> str:
+        """Return a safe controller type string from firmware/config/UI data."""
+        if isinstance(value, int):
+            type_by_id = {
+                1: config.CONTROLLER_TYPE_GAMEPAD,
+                2: config.CONTROLLER_TYPE_FOOT_PEDAL,
+            }
+            return type_by_id.get(value, config.CONTROLLER_TYPE_UNKNOWN)
+
+        if isinstance(value, str):
+            candidate = value.strip().lower().replace("-", "_")
+            if candidate in config.VALID_CONTROLLER_TYPES:
+                return candidate
+
+        return config.CONTROLLER_TYPE_UNKNOWN
+
+    def _normalise_mac(self, mac: str) -> str:
+        """Normalise a MAC address for config-map lookups."""
+        return (mac or "").strip().upper()
+
+    def _controller_type_for_peer(self, peer: dict) -> str:
+        """Resolve controller type from UI override, firmware, or config."""
+        slot_id = int(peer.get("slot_id", 0))
+        if slot_id in self.controller_type_overrides:
+            return self.controller_type_overrides[slot_id]
+
+        mac = self._normalise_mac(peer.get("mac", ""))
+        if mac in getattr(config, "CONTROLLER_TYPE_BY_MAC", {}):
+            return self._normalise_controller_type(config.CONTROLLER_TYPE_BY_MAC[mac])
+
+        oui = ":".join(mac.split(":")[:3]) if mac else ""
+        if oui in getattr(config, "CONTROLLER_TYPE_BY_OUI", {}):
+            return self._normalise_controller_type(config.CONTROLLER_TYPE_BY_OUI[oui])
+
+        for key in ("controller_type", "peer_type", "type"):
+            if key in peer:
+                return self._normalise_controller_type(peer.get(key))
+
+        return config.CONTROLLER_TYPE_UNKNOWN
+
+    def _prepare_peer(self, peer: dict) -> dict:
+        """Return a peer dict with stable frontend fields and safe defaults."""
+        prepared = dict(peer)
+        prepared["slot_id"] = int(prepared.get("slot_id", 0))
+        prepared["mac"] = self._normalise_mac(prepared.get("mac", ""))
+        prepared["active"] = bool(prepared.get("active", False))
+        prepared["last_seen"] = int(prepared.get("last_seen", 0))
+        prepared["packet_count"] = int(prepared.get("packet_count", prepared.get("packets", 0)))
+        prepared["controller_type"] = self._controller_type_for_peer(prepared)
+        return prepared
+
+    def _prepare_peers(self):
+        """Normalise all known peers in-place."""
+        self.peers = [self._prepare_peer(peer) for peer in self.peers]
+
+    def _active_peer(self) -> Optional[dict]:
+        """Return the currently selected peer, if any."""
+        self._prepare_peers()
+        for peer in self.peers:
+            if peer.get("active", False):
+                return peer
+        return None
+
+    def _active_controller_type(self) -> str:
+        """Return the active peer type or unknown."""
+        peer = self._active_peer()
+        if not peer:
+            return config.CONTROLLER_TYPE_UNKNOWN
+        return peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+
+    def _active_link_healthy(self) -> bool:
+        """Check whether the selected controller has a recent frame."""
+        if self.last_active_frame_time <= 0:
+            return False
+        return time.monotonic() - self.last_active_frame_time <= config.LINK_TIMEOUT_S
+
+    def _touch_controller_peer(self, controller_id: int):
+        """Update or create peer state for a received controller frame."""
+        self._prepare_peers()
+        peer = next((p for p in self.peers if int(p.get("slot_id", 0)) == controller_id), None)
+        if peer is None:
+            peer = {
+                "slot_id": controller_id,
+                "mac": "",
+                "active": not any(p.get("active", False) for p in self.peers),
+                "last_seen": int(time.time()),
+                "packet_count": 0,
+            }
+            self.peers.append(peer)
+
+        peer["last_seen"] = int(time.time())
+        peer["packet_count"] = int(peer.get("packet_count", 0)) + 1
+        peer["controller_type"] = self._controller_type_for_peer(peer)
+
+    def _frame_from_active_controller(self, controller_id: int) -> bool:
+        """Return true when a joystick frame belongs to the active peer."""
+        peer = self._active_peer()
+        return peer is not None and int(peer.get("slot_id", 0)) == controller_id
+
+    def _controller_supports_action(self, controller_type: str, action: str) -> bool:
+        """Policy table for per-type movement and macro permissions."""
+        if controller_type == config.CONTROLLER_TYPE_GAMEPAD:
+            return action in ("xy", "z", "home", "stitch", "needle", "any")
+
+        if controller_type == config.CONTROLLER_TYPE_FOOT_PEDAL:
+            return action in ("stitch", "needle", "any")
+
+        return False
+
+    def _can_enable_live_control(self) -> Tuple[bool, str]:
+        """Check static requirements for switching Live Control on."""
+        if not self.dongle_connected:
+            return False, "dongle_disconnected"
+
+        peer = self._active_peer()
+        if not peer:
+            return False, "no_active_controller"
+
+        controller_type = peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+        if not self._controller_supports_action(controller_type, "any"):
+            return False, "unknown_controller"
+
+        return True, ""
+
+    async def _set_live_control(self, enabled: bool, reason: str) -> Tuple[bool, str]:
+        """Enable/disable Live Control. Disabled always clears motion state."""
+        if enabled:
+            allowed, block_reason = self._can_enable_live_control()
+            if not allowed:
+                self._zero_motion_state()
+                self.live_control_enabled = False
+                logger.warning(f"Live Control enable rejected: {block_reason}")
+                return False, block_reason
+
+            self.live_control_enabled = True
+            logger.info(f"Live Control enabled ({reason})")
+            return True, ""
+
+        if self.live_control_enabled:
+            logger.info(f"Live Control disabled ({reason})")
+        self.live_control_enabled = False
+        self._zero_motion_state()
+        return True, ""
+
+    def _can_run_motion_action(self, action: str) -> Tuple[bool, str]:
+        """Check dynamic requirements before any movement or movement macro."""
+        if not self.live_control_enabled:
+            return False, "live_control_off"
+
+        peer = self._active_peer()
+        if not peer:
+            return False, "no_active_controller"
+
+        controller_type = peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+        if not self._controller_supports_action(controller_type, action):
+            if controller_type == config.CONTROLLER_TYPE_UNKNOWN:
+                return False, "unknown_controller"
+            return False, "unsupported_controller_type"
+
+        if not self._active_link_healthy():
+            return False, "link_inactive"
+
+        if not self.printer_idle:
+            return False, "printer_busy"
+
+        return True, ""
+
+    async def _reject_motion_action(self, action: str, reason: str):
+        """Log a rejected motion action without generating G-code."""
+        logger.warning(f"Motion action '{action}' rejected: {reason}")
+
+    def _motion_block_reason(self) -> str:
+        """Return the current UI-facing reason that motion is blocked."""
+        if not self.live_control_enabled:
+            return "live_control_off"
+
+        allowed, reason = self._can_run_motion_action("any")
+        if not allowed:
+            return reason
+
+        if config.REQUIRE_HOMED and not ('x' in self.homed_axes and 'y' in self.homed_axes):
+            return "not_homed"
+
+        return ""
+
     # ==================== Dongle API Commands ====================
 
+    async def _dongle_request(self, frame: bytes, response_to: int,
+                              request_id: int) -> Optional[bytes]:
+        """Send a query/command on the daemon's own port and await the reply.
+
+        While live_jogd runs it must be the only user of the dongle port: a
+        second process (dongle_api.py) flushes the shared input queue and
+        consumes the bytes the read loop needs, dropping joystick frames.
+        Returns the response payload, or None on timeout, error status or a
+        closed port.
+        """
+        if not self.serial_port or not self.serial_port.is_open:
+            return None
+
+        async with self._dongle_lock:
+            future = asyncio.get_running_loop().create_future()
+            self._dongle_pending = (response_to, request_id, future)
+            try:
+                self.serial_port.write(frame)
+                response = await asyncio.wait_for(
+                    future, config.DONGLE_REQUEST_TIMEOUT_S)
+            except serial.SerialException as e:
+                logger.error(f"Dongle request 0x{response_to:02X}/0x{request_id:02X} failed: {e}")
+                return None
+            except asyncio.TimeoutError:
+                logger.debug(f"Dongle request 0x{response_to:02X}/0x{request_id:02X} timed out")
+                return None
+            finally:
+                self._dongle_pending = None
+
+        if response.status != RESP_OK:
+            logger.warning(
+                f"Dongle request 0x{response_to:02X}/0x{request_id:02X} "
+                f"returned status 0x{response.status:02X}")
+            return None
+        return response.data
+
+    def _resolve_dongle_response(self, frame: ResponseFrame):
+        """Hand a response frame to the request waiting for it, if any."""
+        pending = self._dongle_pending
+        if pending is None:
+            return
+        response_to, request_id, future = pending
+        if (frame.response_to == response_to and frame.id == request_id
+                and not future.done()):
+            future.set_result(frame)
+
+    async def _dongle_query(self, query_id: int) -> Optional[bytes]:
+        return await self._dongle_request(
+            FrameBuilder.build_query(query_id), MSG_TYPE_QUERY, query_id)
+
+    async def _dongle_command(self, cmd_id: int, param: int = 0) -> bool:
+        data = await self._dongle_request(
+            FrameBuilder.build_command(cmd_id, param), MSG_TYPE_COMMAND, cmd_id)
+        return data is not None
+
     async def _dongle_set_wifi(self, enabled: bool) -> bool:
-        """Set WiFi state via dongle_api.py."""
-        try:
-            cmd = ['python3', DONGLE_API_PATH, '--wifi', 'on' if enabled else 'off']
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                self.dongle_info["wifi_enabled"] = enabled
-                logger.info(f"WiFi set to {'on' if enabled else 'off'}")
-                return True
-            else:
-                logger.error(f"WiFi command failed: {stderr.decode()}")
-                return False
-        except Exception as e:
-            logger.error(f"WiFi command exception: {e}")
+        """Enable or disable ESP-NOW/WiFi on the dongle."""
+        if not await self._dongle_command(CMD_WIFI_ENABLE, 1 if enabled else 0):
+            logger.error(f"WiFi command failed ({'on' if enabled else 'off'})")
             return False
+        self.dongle_info["wifi_enabled"] = enabled
+        logger.info(f"WiFi set to {'on' if enabled else 'off'}")
+        return True
 
     async def _dongle_set_pairing(self, enabled: bool) -> bool:
-        """Set pairing mode via dongle_api.py."""
-        try:
-            cmd = ['python3', DONGLE_API_PATH, '--pairing', 'on' if enabled else 'off']
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                self.dongle_status["pairing_mode"] = enabled
-                logger.info(f"Pairing mode set to {'on' if enabled else 'off'}")
-                return True
-            else:
-                logger.error(f"Pairing command failed: {stderr.decode()}")
-                return False
-        except Exception as e:
-            logger.error(f"Pairing command exception: {e}")
+        """Enter or leave pairing mode."""
+        cmd = CMD_ENTER_PAIRING if enabled else CMD_EXIT_PAIRING
+        if not await self._dongle_command(cmd):
+            logger.error(f"Pairing command failed ({'on' if enabled else 'off'})")
             return False
+        self.dongle_status["pairing_mode"] = enabled
+        logger.info(f"Pairing mode set to {'on' if enabled else 'off'}")
+        return True
 
     async def _dongle_set_led(self, brightness: int) -> bool:
         """Set LED brightness via dongle_api.py."""
@@ -224,36 +463,73 @@ class LiveJogDaemon:
             return False
 
     async def _dongle_clear_peers(self) -> bool:
-        """Clear all peers via dongle_api.py."""
-        try:
-            cmd = ['python3', DONGLE_API_PATH, '--clear-peers']
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                self.peers = []
-                logger.info("Peers cleared")
-                return True
-            else:
-                logger.error(f"Clear peers command failed: {stderr.decode()}")
-                return False
-        except Exception as e:
-            logger.error(f"Clear peers command exception: {e}")
+        """Clear all stored controller pairings."""
+        if not await self._dongle_command(CMD_CLEAR_PEERS):
+            logger.error("Clear peers command failed")
             return False
+        self.peers = []
+        logger.info("Peers cleared")
+        return True
 
     async def _dongle_select_controller(self, slot_id: int) -> bool:
         """Select active controller (local only for now)."""
         try:
+            self._prepare_peers()
+            active_peer = self._active_peer()
+            if active_peer and int(active_peer.get("slot_id", 0)) == slot_id:
+                return True
+
             for peer in self.peers:
                 peer["active"] = (peer["slot_id"] == slot_id)
+            await self._set_live_control(False, "controller selection changed")
             logger.info(f"Selected controller slot {slot_id}")
             return True
         except Exception as e:
             logger.error(f"Select controller exception: {e}")
             return False
+
+    async def _dongle_set_controller_type(self, slot_id: int, controller_type: str) -> bool:
+        """Set a runtime-only controller type override."""
+        normalised_type = self._normalise_controller_type(controller_type)
+        self._prepare_peers()
+        peer = next((p for p in self.peers if int(p.get("slot_id", 0)) == slot_id), None)
+        previous_type = (
+            peer.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+            if peer
+            else config.CONTROLLER_TYPE_UNKNOWN
+        )
+
+        self.controller_type_overrides[slot_id] = normalised_type
+        self._prepare_peers()
+
+        active_peer = self._active_peer()
+        if (
+            active_peer
+            and int(active_peer.get("slot_id", 0)) == slot_id
+            and previous_type != normalised_type
+        ):
+            await self._set_live_control(False, "controller type changed")
+
+        logger.info(f"Controller slot {slot_id} type set to {normalised_type}")
+        return True
+
+    def _merge_dongle_peers(self, peers: list):
+        """Replace the peer list from the dongle, keeping the local selection.
+
+        The dongle's ``active`` flag is its own view of a slot, not the
+        controller the user selected in the UI. Motion gating trusts the
+        selection (_active_peer), so the dongle must never change it.
+        """
+        selected = self._active_peer()
+        selected_slot = int(selected["slot_id"]) if selected else None
+        merged = [self._prepare_peer(peer) for peer in peers]
+        if selected_slot is None:
+            # Nothing selected yet: adopt the dongle's first active slot.
+            first = next((p for p in merged if p["active"]), None)
+            selected_slot = first["slot_id"] if first else None
+        for peer in merged:
+            peer["active"] = peer["slot_id"] == selected_slot
+        self.peers = merged
 
     async def _dongle_query_loop(self):
         """Periodically query dongle for real status data."""
@@ -261,53 +537,22 @@ class LiveJogDaemon:
             await asyncio.sleep(5)  # Query every 5 seconds
             if not self.dongle_connected:
                 continue
-            
+
             try:
-                # Query info
-                cmd = ['python3', DONGLE_API_PATH, '--query', 'info', '--json']
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0 and stdout:
-                    try:
-                        info = json.loads(stdout.decode())
-                        self.dongle_info.update(info)
-                    except json.JSONDecodeError:
-                        pass
+                data = await self._dongle_query(QUERY_INFO)
+                info = parse_dongle_info(data) if data is not None else None
+                if info:
+                    self.dongle_info.update(dongle_info_to_dict(info))
 
-                # Query status
-                cmd = ['python3', DONGLE_API_PATH, '--query', 'status', '--json']
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0 and stdout:
-                    try:
-                        status = json.loads(stdout.decode())
-                        self.dongle_status.update(status)
-                    except json.JSONDecodeError:
-                        pass
+                data = await self._dongle_query(QUERY_STATUS)
+                status = parse_dongle_status(data) if data is not None else None
+                if status:
+                    self.dongle_status.update(dongle_status_to_dict(status))
 
-                # Query peers
-                cmd = ['python3', DONGLE_API_PATH, '--query', 'peers', '--json']
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode == 0 and stdout:
-                    try:
-                        peers = json.loads(stdout.decode())
-                        if isinstance(peers, list):
-                            self.peers = peers
-                    except json.JSONDecodeError:
-                        pass
+                data = await self._dongle_query(QUERY_PEERS)
+                peers = parse_peer_list(data) if data is not None else None
+                if peers is not None:
+                    self._merge_dongle_peers([peer_info_to_dict(p) for p in peers])
 
             except Exception as e:
                 logger.debug(f"Dongle query exception: {e}")
@@ -320,9 +565,12 @@ class LiveJogDaemon:
         logger.info(f"Starting WebSocket server on port {port}")
 
         async def handler(websocket):
+            had_clients = bool(self.ws_clients)
             self.ws_clients.add(websocket)
             logger.info(f"WebSocket client connected. Total: {len(self.ws_clients)}")
             try:
+                if not had_clients:
+                    await self._set_live_control(False, "first websocket client connected")
                 # Send initial status
                 await self._ws_send_status(websocket)
                 
@@ -383,6 +631,29 @@ class LiveJogDaemon:
                 }))
                 if success:
                     await self._ws_broadcast_status()
+
+            elif msg_type == "set_controller_type":
+                slot_id = int(data.get("slot_id", data.get("value", 0)))
+                controller_type = data.get("controller_type", config.CONTROLLER_TYPE_UNKNOWN)
+                success = await self._dongle_set_controller_type(slot_id, controller_type)
+                await websocket.send(json.dumps({
+                    "type": "command_response",
+                    "command": "controller_type",
+                    "success": success
+                }))
+                if success:
+                    await self._ws_broadcast_status()
+
+            elif msg_type == "live_control":
+                enabled = bool(data.get("value", False))
+                success, reason = await self._set_live_control(enabled, "websocket")
+                await websocket.send(json.dumps({
+                    "type": "command_response",
+                    "command": "live_control",
+                    "success": success,
+                    "error": reason
+                }))
+                await self._ws_broadcast_status()
             
             elif msg_type == "led":
                 brightness = data.get("value", 128)
@@ -446,23 +717,24 @@ class LiveJogDaemon:
     def _build_ws_status(self) -> dict:
         """Build status dict for WebSocket."""
         # Update dongle_status based on current state
-        self.dongle_status["link_active"] = (
-            time.monotonic() - self.last_frame_time < config.LINK_TIMEOUT_S
-            if self.last_frame_time > 0 else False
-        )
+        self.dongle_status["link_active"] = self._active_link_healthy()
         
         # Check if we have an active controller
+        self._prepare_peers()
         has_active = any(p.get("active", False) for p in self.peers)
         if not has_active and self.last_frame_time > 0:
             # Auto-create a peer if we're receiving data
             if not self.peers:
                 self.peers = [{
                     "slot_id": 0,
-                    "mac": "AA:BB:CC:DD:EE:FF",
+                    "mac": "",
                     "active": True,
                     "last_seen": int(time.time()),
                     "packet_count": self.dongle_status.get("packets_rx", 0)
                 }]
+                self._prepare_peers()
+
+        motion_block_reason = self._motion_block_reason()
         
         return {
             "type": "status",
@@ -470,6 +742,10 @@ class LiveJogDaemon:
             "dongle_info": self.dongle_info,
             "dongle_status": self.dongle_status,
             "peers": self.peers,
+            "live_control_enabled": self.live_control_enabled,
+            "active_controller_type": self._active_controller_type(),
+            "motion_enabled": self.live_control_enabled and motion_block_reason == "",
+            "motion_block_reason": motion_block_reason,
             "joystick": {
                 "vx": self.current_vx,
                 "vy": self.current_vy,
@@ -511,9 +787,17 @@ class LiveJogDaemon:
         self.dongle_status["packets_rx"] = self.dongle_status.get("packets_rx", 0) + 1
 
         if isinstance(frame, JoystickFrame):
+            self._touch_controller_peer(frame.controller_id)
+            if not self._frame_from_active_controller(frame.controller_id):
+                return
+
+            self.last_active_frame_time = self.last_frame_time
+            self.link_timed_out = False
             await self._handle_joystick(frame)
         elif isinstance(frame, HeartbeatFrame):
             self._handle_heartbeat(frame)
+        elif isinstance(frame, ResponseFrame):
+            self._resolve_dongle_response(frame)
 
     async def _handle_joystick(self, frame: JoystickFrame):
         """Process joystick frame."""
@@ -537,26 +821,54 @@ class LiveJogDaemon:
         """Handle UI action from controller."""
         if action == config.UI_ACT_HOME_ALL:
             logger.info("UI Action: Home All")
-            await self.moonraker.home("xyz")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("xyz")
+            else:
+                await self._reject_motion_action("home_all", reason)
         elif action == config.UI_ACT_HOME_XY:
             logger.info("UI Action: Home XY")
-            await self.moonraker.home("xy")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("xy")
+            else:
+                await self._reject_motion_action("home_xy", reason)
         elif action == config.UI_ACT_HOME_X:
             logger.info("UI Action: Home X")
-            await self.moonraker.home("x")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("x")
+            else:
+                await self._reject_motion_action("home_x", reason)
         elif action == config.UI_ACT_HOME_Y:
             logger.info("UI Action: Home Y")
-            await self.moonraker.home("y")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("y")
+            else:
+                await self._reject_motion_action("home_y", reason)
         elif action == config.UI_ACT_HOME_Z:
             logger.info("UI Action: Home Z")
-            await self.moonraker.home("z")
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("z")
+            else:
+                await self._reject_motion_action("home_z", reason)
         elif action == config.UI_ACT_STITCH:
             logger.info("UI Action: Stitch")
-            await self.moonraker.run_macro("STITCH")
+            allowed, reason = self._can_run_motion_action("stitch")
+            if allowed:
+                await self.moonraker.run_macro("STITCH")
+            else:
+                await self._reject_motion_action("stitch", reason)
         elif action == config.UI_ACT_MACRO:
             if value == config.MACRO_NEEDLE_TOGGLE:
                 logger.info("UI Action: Needle Toggle")
-                await self.moonraker.run_macro("NEEDLE_TOGGLE")
+                allowed, reason = self._can_run_motion_action("needle")
+                if allowed:
+                    await self.moonraker.run_macro("NEEDLE_TOGGLE")
+                else:
+                    await self._reject_motion_action("needle_toggle", reason)
             else:
                 logger.info("UI Action: Macro %d", value)
 
@@ -565,20 +877,28 @@ class LiveJogDaemon:
         # Detect rising edges
         rising = buttons & ~self.prev_buttons
 
+        # Button SELECT: Emergency Stop stays available regardless of Live Control.
+        if rising & config.BTN_SELECT:
+            logger.warning("Button SELECT: EMERGENCY STOP")
+            await self.moonraker.emergency_stop()
+
         # Button B: Stitch
         if rising & config.BTN_B:
             logger.info("Button B: STITCH")
-            await self.moonraker.run_macro("STITCH")
+            allowed, reason = self._can_run_motion_action("stitch")
+            if allowed:
+                await self.moonraker.run_macro("STITCH")
+            else:
+                await self._reject_motion_action("stitch", reason)
 
         # Button X: Home
         if rising & config.BTN_X:
             logger.info("Button X: HOME XYZ")
-            await self.moonraker.home("xyz")
-
-        # Button SELECT: Emergency Stop
-        if rising & config.BTN_SELECT:
-            logger.warning("Button SELECT: EMERGENCY STOP")
-            await self.moonraker.emergency_stop()
+            allowed, reason = self._can_run_motion_action("home")
+            if allowed:
+                await self.moonraker.home("xyz")
+            else:
+                await self._reject_motion_action("home_xyz", reason)
 
         # Button A/Y: Z movement (continuous while held)
         if buttons & config.BTN_A:
@@ -591,6 +911,11 @@ class LiveJogDaemon:
         # Rate limit Z movement
         now = time.monotonic()
         if now - self.last_z_time < 0.1:  # Max 10 Hz for Z
+            return
+
+        allowed, reason = self._can_run_motion_action("z")
+        if not allowed:
+            await self._reject_motion_action("z", reason)
             return
 
         if config.REQUIRE_HOMED and 'z' not in self.homed_axes:
@@ -629,6 +954,10 @@ class LiveJogDaemon:
 
     async def _can_jog(self) -> bool:
         """Check if jogging is allowed."""
+        allowed, _reason = self._can_run_motion_action("xy")
+        if not allowed:
+            return False
+
         # Require deadman for X/Y movement
         if config.DEADMAN_REQUIRED and not self.current_deadman:
             return False
@@ -670,21 +999,39 @@ class LiveJogDaemon:
         await self.moonraker.jog_relative(x=dx, y=dy, feedrate=feedrate)
 
     async def _status_loop(self):
-        """Send status updates to dongle and update cached state."""
+        """
+        Send status updates to dongle and update cached state.
+
+        Cadence is adaptive (P0-3): 10 Hz while a controller is active
+        (recent joystick frame or deadman pressed), 1 Hz otherwise. The
+        per-tick fan-out of three Moonraker requests is collapsed into a
+        single combined ``/printer/objects/query`` so even the active
+        cadence stays at ~10 req/s instead of ~30.
+        """
         logger.info("Status loop started")
 
         while self.running:
             now = time.monotonic()
 
-            if now - self.last_status_time >= config.STATUS_INTERVAL_S:
+            controller_active = (
+                self.current_deadman
+                or (self.last_active_frame_time > 0
+                    and now - self.last_active_frame_time < config.CONTROLLER_ACTIVE_TIMEOUT_S)
+            )
+            interval = (
+                config.STATUS_INTERVAL_S
+                if controller_active
+                else config.STATUS_INTERVAL_IDLE_S
+            )
+
+            if now - self.last_status_time >= interval:
                 self.last_status_time = now
 
-                # Update cached state from Moonraker
-                self.homed_axes = await self.moonraker.get_homed_axes()
-                self.printer_idle = await self.moonraker.is_idle()
-                self.current_pos = await self.moonraker.get_position()
+                pos, homed, idle = await self.moonraker.get_status_snapshot()
+                self.current_pos = pos
+                self.homed_axes = homed
+                self.printer_idle = idle
 
-                # Build and send status frame
                 await self._send_status()
 
             await asyncio.sleep(0.01)
@@ -747,14 +1094,25 @@ class LiveJogDaemon:
             now = time.monotonic()
 
             # Check for link timeout
-            if self.last_frame_time > 0:
-                elapsed = now - self.last_frame_time
+            if self.last_active_frame_time > 0:
+                elapsed = now - self.last_active_frame_time
                 if elapsed > config.LINK_TIMEOUT_S:
-                    logger.warning(f"Link timeout! No frame for {elapsed:.3f}s")
-                    # Reset velocity to stop movement
-                    self.current_vx = 0
-                    self.current_vy = 0
-                    self.current_deadman = False
+                    if not self.link_timed_out:
+                        logger.warning(f"Link timeout! No active-controller frame for {elapsed:.3f}s")
+                        self._zero_motion_state()
+                        await self._ws_broadcast_status()
+                        self.link_timed_out = True
+                    else:
+                        self._zero_motion_state()
+
+                live_control_timeout = getattr(
+                    config,
+                    "LIVE_CONTROL_LINK_TIMEOUT_S",
+                    max(2.0, config.LINK_TIMEOUT_S),
+                )
+                if self.live_control_enabled and elapsed > live_control_timeout:
+                    await self._set_live_control(False, "sustained link timeout")
+                    await self._ws_broadcast_status()
 
             await asyncio.sleep(0.05)  # Check every 50ms
 

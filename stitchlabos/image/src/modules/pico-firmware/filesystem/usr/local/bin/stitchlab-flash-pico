@@ -1,0 +1,424 @@
+#!/usr/bin/env bash
+# stitchlab-flash-pico — commission or update the SKR Pico from the Pi itself.
+#
+# Two paths, both offline (a freshly imaged Pi in AP mode has no internet):
+#
+#   1. BOOTSEL: a blank RP2040 only accepts UF2 over USB mass storage. The SKR
+#      Pico V1.0 has no BOOTSEL button: put a jumper on its BOOT pins, connect
+#      it to a Pi USB port and press RESET. This script copies Katapult onto it
+#      and clears any old application, so a used board behaves like a fresh
+#      one. Needed exactly once per board.
+#   2. UART: once Katapult is on the Pico, Klipper is flashed over
+#      /dev/serial0 — the same wires Klipper talks on. No cable, no jumper.
+#
+# Running it with no arguments does the right thing: it uses a Pico that is
+# already in BOOTSEL mode, and otherwise walks you into flash mode, or on to
+# the UART path when you say Katapult is already on the board. It never
+# guesses which of the two applies.
+
+set -euo pipefail
+
+FW_DIR="${PICO_FIRMWARE_DIR:-/home/pi/firmware}"
+SERIAL="${PICO_FIRMWARE_SERIAL:-/dev/serial0}"
+BAUD="${PICO_FIRMWARE_BAUD:-115200}"
+
+KATAPULT_UF2="${FW_DIR}/katapult.uf2"
+KLIPPER_BIN="${FW_DIR}/klipper.bin"
+KLIPPER_UF2="${FW_DIR}/klipper.uf2"
+# Bootloader-free build: the only .uf2 that boots without Katapult behind it.
+KLIPPER_STANDALONE_UF2="${FW_DIR}/klipper-standalone.uf2"
+
+FLASHTOOL="/home/pi/katapult/scripts/flashtool.py"
+PY="/home/pi/klippy-env/bin/python"
+
+BOOTSEL_LABEL="RPI-RP2"
+# Without a terminal nobody can say when RESET was pressed, so wait long: the
+# four physical steps took a person just over two minutes in the 2026-09-28
+# commissioning run, where a 120-second wait ran out two seconds too early.
+BOOTSEL_WAIT="${BOOTSEL_WAIT:-300}"
+# With a terminal the operator presses Enter after RESET; the drive then
+# appears within seconds.
+BOOTSEL_SETTLE="${BOOTSEL_SETTLE:-15}"
+# acquire_bootsel's exit status when the operator says Katapult is already on
+# the Pico (0 is a drive, 1 is none).
+BOOTSEL_SKIP=3
+MOUNTPOINT="/run/stitchlab-pico-bootsel"
+
+MODE="auto"
+case "${1:-}" in
+    --bootsel) MODE="bootsel" ;;
+    --uart)    MODE="uart" ;;
+    --standalone) MODE="standalone" ;;
+    -h|--help)
+        sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+        cat <<'USAGE'
+
+Usage:
+  stitchlab-flash-pico              Commission a Pico: BOOTSEL if present, then UART
+  stitchlab-flash-pico --bootsel    Only write Katapult via USB BOOTSEL
+  stitchlab-flash-pico --uart       Only write Klipper via Katapult over UART
+  stitchlab-flash-pico --standalone Write Klipper directly via BOOTSEL, no Katapult
+                                    (recovery path; later updates need BOOTSEL again)
+USAGE
+        exit 0
+        ;;
+    "") ;;
+    *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
+esac
+
+say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
+info() { printf '  %s\n' "$*"; }
+fail() { printf '\n\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# set -e ends the script at the first failing command. Say which one, or a
+# failed step looks as if the script had simply stopped.
+set -E
+on_error() {
+    printf '\n\033[31mERROR: "%s" failed with exit code %s (line %s).\033[0m\n' "$2" "$3" "$1" >&2
+}
+trap 'on_error "$LINENO" "$BASH_COMMAND" "$?"' ERR
+
+# Every path needs root: stopping klipper, mounting the Pico, running
+# flashtool. Ask once, up front, and say so when it fails — a wrong password
+# or a prompt nobody answered used to end the script without a word.
+ensure_sudo() {
+    if sudo -n true 2>/dev/null; then
+        return 0
+    fi
+    info "This needs root: sudo asks for the password of user ${USER:-pi}."
+    sudo -v || fail "sudo failed (wrong password, or the prompt timed out). Run stitchlab-flash-pico again and enter the password of user ${USER:-pi}."
+}
+
+require_file() {
+    [ -s "$1" ] || fail "$1 is missing or empty. Was this image built by CI with the firmware job?"
+}
+
+# --- Klipper must let go of the UART before we can use it -------------------
+KLIPPER_WAS_ACTIVE=0
+release_serial() {
+    if systemctl is-active --quiet klipper; then
+        info "Stopping klipper (it holds ${SERIAL})"
+        sudo systemctl stop klipper || fail "Could not stop klipper, which holds ${SERIAL}."
+        KLIPPER_WAS_ACTIVE=1
+    fi
+}
+restore_klipper() {
+    if [ "$KLIPPER_WAS_ACTIVE" = "1" ]; then
+        info "Starting klipper again"
+        sudo systemctl start klipper \
+            || info "Could not start klipper again. Start it with: sudo systemctl start klipper"
+    fi
+}
+
+# --- Katapult for any board, fresh or used ---------------------------------
+# Katapult starts whatever application it finds at 0x10004000. On a Pico that
+# ran older firmware that is the old Klipper, which then ignores the UART
+# bootloader request. Write Katapult together with an erased application
+# sector, so a used board comes up exactly like a factory-fresh one.
+KATAPULT_CLEAN_UF2=""
+prepare_katapult() {
+    require_file "$KATAPULT_UF2"
+    KATAPULT_CLEAN_UF2="$(mktemp --suffix=.uf2)"
+    /usr/local/bin/stitchlab-uf2-clear-app "$KATAPULT_UF2" "$KATAPULT_CLEAN_UF2" \
+        || fail "Could not prepare Katapult from ${KATAPULT_UF2}"
+}
+
+cleanup() {
+    restore_klipper
+    if [ -n "$KATAPULT_CLEAN_UF2" ]; then
+        rm -f "$KATAPULT_CLEAN_UF2"
+    fi
+}
+trap cleanup EXIT
+
+# --- BOOTSEL path -----------------------------------------------------------
+find_bootsel_device() {
+    # udev creates this link without any probing, so it needs no root and no
+    # blkid cache. Unprivileged `blkid -L` only works via this same link;
+    # `sudo blkid -L` can additionally probe if udev has not run yet.
+    local dev
+    dev="$(readlink -f "/dev/disk/by-label/${BOOTSEL_LABEL}" 2>/dev/null || true)"
+    if [ -n "$dev" ] && [ -b "$dev" ]; then
+        echo "$dev"
+        return 0
+    fi
+    dev="$(blkid -L "$BOOTSEL_LABEL" 2>/dev/null || true)"
+    # -n: never prompt for a password from inside the poll loop
+    [ -n "$dev" ] || dev="$(sudo -n blkid -L "$BOOTSEL_LABEL" 2>/dev/null || true)"
+    [ -n "$dev" ] && echo "$dev"
+    return 0
+}
+
+is_interactive() {
+    [ -t 0 ]
+}
+
+# Poll for the drive for up to $1 seconds; prints its device path when found.
+poll_bootsel() {
+    local dev deadline
+    deadline=$(( $(date +%s) + $1 ))
+    while :; do
+        dev="$(find_bootsel_device)"
+        if [ -n "$dev" ]; then
+            echo "$dev"
+            return 0
+        fi
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
+        sleep 2
+    done
+}
+
+show_bootsel_steps() {
+    say "Put the SKR Pico into flash mode (BOOTSEL)"
+    info "1. Switch on the machine's 24 V supply"
+    info "2. Put a jumper on the Pico's BOOT pins"
+    info "3. Connect the Pico to a USB port of the Pi (data cable, plug fully in)"
+    info "4. Press RESET on the Pico"
+    info "I will ask you to remove the jumper before anything is written."
+}
+
+show_bootsel_checklist() {
+    say "No ${BOOTSEL_LABEL} drive appeared"
+    info "- Was the BOOT jumper on when RESET was pressed? Fitting it afterwards does nothing."
+    info "- Is the 24 V supply on?"
+    info "- Is the USB cable a data cable, fully plugged in? 'lsusb | grep 2e8a' should list 2e8a:0003."
+}
+
+# Ask until the answer is one of the offered letters; prints it lowercased.
+ask_choice() {
+    local prompt="$1" allowed="$2" answer
+    while :; do
+        printf '\n  %s' "$prompt" >&2
+        read -r answer || return 1
+        answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
+        case " $allowed " in
+            *" ${answer:-enter} "*) echo "${answer:-enter}"; return 0 ;;
+        esac
+        info "Please answer with one of: ${allowed}" >&2
+    done
+}
+
+# Find the Pico in flash mode. Prints the device path and returns 0, returns
+# BOOTSEL_SKIP when the operator says Katapult is already on the Pico (only
+# offered with "skip" as $1), and 1 when there is no drive. Callers capture
+# stdout as the device path, so every message goes to stderr.
+acquire_bootsel() {
+    local offer_skip="${1:-}" dev choice
+    # Its non-zero exits are answers, not failures. This runs in a command
+    # substitution, so clearing the ERR trap here does not reach the caller;
+    # bash 3.2 would otherwise report "return 1" as a failed command.
+    trap - ERR
+    dev="$(find_bootsel_device)"
+    if [ -n "$dev" ]; then
+        echo "$dev"
+        return 0
+    fi
+
+    show_bootsel_steps >&2
+
+    if ! is_interactive; then
+        info "Not interactive: waiting up to ${BOOTSEL_WAIT}s for a drive labelled ${BOOTSEL_LABEL} ..." >&2
+        if poll_bootsel "$BOOTSEL_WAIT"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    local first_prompt="Press Enter once RESET is pressed: "
+    if [ -n "$offer_skip" ]; then
+        first_prompt="Press Enter once RESET is pressed, or type u if Katapult is already on this Pico (flash Klipper over the UART): "
+    fi
+    choice="$(ask_choice "$first_prompt" "enter${offer_skip:+ u}")" || return 1
+    while :; do
+        if [ "$choice" = "u" ]; then
+            return "$BOOTSEL_SKIP"
+        fi
+        info "Looking for ${BOOTSEL_LABEL} for up to ${BOOTSEL_SETTLE}s ..." >&2
+        if poll_bootsel "$BOOTSEL_SETTLE"; then
+            return 0
+        fi
+        show_bootsel_checklist >&2
+        if [ -n "$offer_skip" ]; then
+            choice="$(ask_choice "r = look again, u = Katapult is already on this Pico (UART), q = quit: " "r u q")" || return 1
+        else
+            choice="$(ask_choice "r = look again, q = quit: " "r q")" || return 1
+        fi
+        [ "$choice" != "q" ] || return 1
+    done
+}
+
+# The RP2040 checks BOOT at every reset. A jumper still on when the UF2 lands
+# makes the board restart into flash mode instead of the new firmware.
+confirm_boot_jumper_removed() {
+    if [ -t 0 ]; then
+        printf '\n  \033[1mRemove the BOOT jumper now\033[0m (the Pico stays in flash mode), then press Enter: '
+        read -r _
+    else
+        info "Not interactive: make sure the BOOT jumper is off, or the Pico restarts into flash mode."
+    fi
+}
+
+NO_BOOTSEL_MESSAGE="No ${BOOTSEL_LABEL} drive found. Is the 24 V supply on, the BOOT jumper fitted, the USB cable a data cable and fully seated, and was RESET pressed?"
+
+# $1 is the drive from acquire_bootsel: looking for it again here printed
+# "Found" twice in auto mode.
+flash_via_bootsel() {
+    local dev="$1" uf2="$2" label="$3"
+    require_file "$uf2"
+    info "Found ${BOOTSEL_LABEL} at ${dev}."
+    confirm_boot_jumper_removed
+
+    sudo mkdir -p "$MOUNTPOINT"
+    sudo mount "$dev" "$MOUNTPOINT"
+    # The RP2040 reboots the instant the UF2 is written, which tears the mount
+    # down under us — so unmount failures here are expected, not errors.
+    sudo cp "$uf2" "${MOUNTPOINT}/" || true
+    sync || true
+    sudo umount "$MOUNTPOINT" 2>/dev/null || true
+    sudo rmdir "$MOUNTPOINT" 2>/dev/null || true
+
+    # The only reliable success signal is the drive going away: the RP2040
+    # reboots into the new code the moment the last UF2 block lands. A drive
+    # that is still there means nothing (or not everything) was written.
+    local waited=0
+    while [ -n "$(find_bootsel_device)" ]; do
+        if [ "$waited" -ge 15 ]; then
+            fail "${BOOTSEL_LABEL} is still there after writing ${uf2}. Either the BOOT jumper is still on and the Pico restarted into flash mode (the firmware is written: remove the jumper and press RESET; after Katapult, continue with stitchlab-flash-pico --uart), or the write did not complete (check the cable and run this again)."
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    info "${label} written — the Pico rebooted."
+    sleep 5
+}
+
+# --- UART path --------------------------------------------------------------
+flash_via_uart() {
+    require_file "$KLIPPER_BIN"
+    [ -f "$FLASHTOOL" ] || fail "${FLASHTOOL} is missing (Katapult module not installed?)"
+    [ -x "$PY" ]        || fail "${PY} is missing (Klipper venv not installed?)"
+    [ -e "$SERIAL" ]    || fail "${SERIAL} does not exist. Check enable_uart=1 and dtoverlay=disable-bt in /boot/firmware/config.txt."
+
+    say "Flashing Klipper over ${SERIAL} (${BAUD} baud)"
+
+    # flashtool occasionally misses the first serial resync on the RP2040
+    # (known timing quirk, seen on stitchlab07). Retry before giving up.
+    local attempt
+    for attempt in 1 2 3; do
+        info "Attempt ${attempt}/3 ..."
+        # A Pico that already runs Klipper answers only after it has been
+        # asked to reboot into Katapult. flashtool sends that request over a
+        # plain UART only with -r, so do it explicitly; on a Pico that is
+        # already in Katapult the request is ignored.
+        sudo "$PY" "$FLASHTOOL" -d "$SERIAL" -b "$BAUD" -r >/dev/null 2>&1 || true
+        sleep 2
+        if sudo "$PY" "$FLASHTOOL" -d "$SERIAL" -b "$BAUD" -f "$KLIPPER_BIN"; then
+            info "Klipper firmware written."
+            return 0
+        fi
+        sleep 3
+    done
+    fail "Flashing over UART failed after 3 attempts. Is Katapult on the Pico? If not: stitchlab-flash-pico --bootsel"
+}
+
+# --- Verification -----------------------------------------------------------
+# Klippy rolls its log over when it starts and then needs a few seconds to
+# connect to the MCU; on stitchlabdev (2026-10-11) it needed more than the
+# fixed 8 s this check used to wait, and the script reported a failure that
+# had not happened. Wait for an MCU line written after the restart instead.
+KLIPPY_LOG="${PICO_KLIPPY_LOG:-/home/pi/printer_data/logs/klippy.log}"
+VERIFY_WAIT="${VERIFY_WAIT:-30}"
+MCU_LINE="MCU 'mcu' config"
+
+# "<inode> <MCU lines>" of the log. A new inode means Klippy started a
+# fresh log; in the same file only an additional MCU line is new.
+klippy_log_state() {
+    local inode count
+    inode="$(ls -i "$KLIPPY_LOG" 2>/dev/null | awk '{print $1}' || true)"
+    # grep -c prints 0 and fails when nothing matches; the || stays inside,
+    # or the ERR trap reports the subshell's grep.
+    count="$(grep -c "$MCU_LINE" "$KLIPPY_LOG" 2>/dev/null || true)"
+    echo "${inode:-none} ${count:-0}"
+}
+
+verify_mcu() {
+    local before_inode before_count now_inode now_count waited=0
+    say "Checking whether Klipper sees the MCU"
+    read -r before_inode before_count <<< "$(klippy_log_state)"
+    sudo systemctl restart klipper
+    KLIPPER_WAS_ACTIVE=0   # we just started it ourselves
+    info "Waiting up to ${VERIFY_WAIT}s for Klipper to configure the MCU ..."
+
+    while [ "$waited" -lt "$VERIFY_WAIT" ]; do
+        sleep 2
+        waited=$((waited + 2))
+        read -r now_inode now_count <<< "$(klippy_log_state)"
+        if { [ "$now_inode" != "$before_inode" ] && [ "$now_count" -gt 0 ]; } \
+            || [ "$now_count" -gt "$before_count" ]; then
+            info "OK — MCU connected after ${waited}s."
+            return 0
+        fi
+    done
+
+    printf '\n\033[33mMCU not confirmed within %ss.\033[0m Last lines of klippy.log:\n\n' "$VERIFY_WAIT"
+    tail -n 15 "$KLIPPY_LOG" 2>/dev/null || echo "  (no klippy.log)"
+    printf '\nSee docs/11-commissioning.md, section "The MCU does not answer".\n'
+    return 1
+}
+
+# --- Main -------------------------------------------------------------------
+main() {
+    local dev rc
+    say "StitchLAB SKR Pico Firmware"
+    info "Firmware:  ${FW_DIR}"
+    info "Serial:    ${SERIAL} @ ${BAUD}"
+    ensure_sudo
+
+    case "$MODE" in
+        bootsel)
+            release_serial
+            prepare_katapult
+            dev="$(acquire_bootsel)" || fail "$NO_BOOTSEL_MESSAGE"
+            flash_via_bootsel "$dev" "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
+            info "The Pico now waits in Katapult. Flash Klipper with: stitchlab-flash-pico --uart"
+            ;;
+        uart)
+            release_serial
+            flash_via_uart
+            verify_mcu || true
+            ;;
+        standalone)
+            release_serial
+            dev="$(acquire_bootsel)" || fail "$NO_BOOTSEL_MESSAGE"
+            flash_via_bootsel "$dev" "$KLIPPER_STANDALONE_UF2" "Klipper (standalone, no Katapult)"
+            verify_mcu || true
+            ;;
+        auto)
+            release_serial
+            rc=0
+            dev="$(acquire_bootsel skip)" || rc=$?
+            case "$rc" in
+                0)
+                    prepare_katapult
+                    flash_via_bootsel "$dev" "$KATAPULT_CLEAN_UF2" "Katapult (old application cleared)"
+                    ;;
+                "$BOOTSEL_SKIP")
+                    info "Skipping flash mode: Katapult is on the Pico, as you said."
+                    ;;
+                *)
+                    fail "${NO_BOOTSEL_MESSAGE} If Katapult is already on this Pico, run 'stitchlab-flash-pico --uart' instead."
+                    ;;
+            esac
+            flash_via_uart
+            verify_mcu || true
+            ;;
+    esac
+
+    say "Done."
+}
+
+# Sourced by the tests, which call the functions without touching hardware.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi

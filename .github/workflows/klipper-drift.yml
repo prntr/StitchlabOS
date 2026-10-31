@@ -1,0 +1,55 @@
+name: Klipper drift check
+
+# Runs our printer.cfg variants, embroidery_macros.cfg, mainsail.cfg and the
+# sample jobs (stitchlabos/drift/samples) through klippy batch mode at the
+# release's pins (stitchlabos/image/upstream-pins.conf) and at upstream
+# master, and lists the upstream changes in between (wissen D-072).
+# Weekly, on demand, and for every release tag, alongside the image build;
+# it does not block the build. Red means a sample misbehaves at the pin;
+# drift against upstream is in the report and the job summary.
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      compare:
+        description: Upstream Klipper ref to compare with
+        default: master
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        # No submodules: the check reads embroidery_macros.cfg at the
+        # stitchlabos-config commit this tree pins.
+
+      - name: Run the drift check
+        env:
+          KLIPPER_DRIFT_OUT: ${{ runner.temp }}/klipper-drift
+          KLIPPER_DRIFT_CACHE: ${{ runner.temp }}/klipper-drift-cache
+          KLIPPER_DRIFT_COMPARE: ${{ inputs.compare || 'master' }}
+        run: make klipper-drift
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/klipper-drift/report.md" ]; then
+            cat "$RUNNER_TEMP/klipper-drift/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the report and logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: klipper-drift-${{ github.run_id }}
+          path: ${{ runner.temp }}/klipper-drift
+          retention-days: 30

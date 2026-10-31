@@ -8,35 +8,67 @@ How StitchLabOS components are developed, released, and updated — both for new
 
 StitchLabOS is built on top of upstream projects (Klipper, Moonraker, Mainsail, TurtleStitch). Each has a different relationship to our fork and therefore a different update path.
 
-```
-┌──────────────────┬──────────────┬───────────────────────────────────────┐
-│ Component        │ Source       │ Update mechanism                      │
-├──────────────────┼──────────────┼───────────────────────────────────────┤
-│ Klipper          │ upstream     │ git pull (Klipper3d/klipper)          │
-│ Moonraker        │ upstream     │ git pull (Arksine/moonraker)          │
-│ Mainsail UI      │ prntr fork   │ GitHub Release zip download           │
-│ TurtleStitch     │ prntr fork   │ git pull (prntr/turtlestitch)         │
-│ StitchLAB config │ prntr repo   │ git pull (prntr/stitchlabos-config)   │
-└──────────────────┴──────────────┴───────────────────────────────────────┘
-```
+| Component | Source | Update mechanism |
+|---|---|---|
+| Klipper | upstream, **pinned per release** | `git`, `pinned_commit` = the release's commit: no update until a release moves the pin |
+| Moonraker | upstream, **pinned per release** | as Klipper |
+| Mainsail UI | prntr fork | GitHub Release zip download (`v2.17.0-stitchlab.N`) |
+| TurtleStitch | prntr fork | `git`, channel **beta**: tagged commits only |
+| StitchLAB config | prntr repo | `git`, channel **beta**: tagged commits only |
 
 All five rows appear in the Mainsail update panel. The user clicks Update — Moonraker handles the rest.
+The pins live in [`stitchlabos/image/upstream-pins.conf`](../stitchlabos/image/upstream-pins.conf)
+(since beta6; wissen D-072). Parts of the image that the panel does not cover are
+listed under [Not update-managed](#not-update-managed).
 
 ---
 
 ## Component breakdown
 
-### Klipper and Moonraker — no fork, direct upstream
+### Klipper and Moonraker — no fork, pinned per release
 
-No customizations in either repo. Deployed machines pull directly from upstream.
+No customizations in either repo. Since beta6 each release ships fixed commits
+(`KLIPPER_REF`, `MOONRAKER_REF` in `upstream-pins.conf`): CI builds the SKR Pico
+firmware from `KLIPPER_REF`, the image clones both at their pins, and
+`moonraker.conf` ends with
 
-- Upstream releases a security fix → update appears in Mainsail panel within 168h (the refresh interval)
-- User clicks Update → `git pull` + service restart
-- **Nothing for the StitchLAB developer to do**
+```ini
+[update_manager klipper]
+pinned_commit: <KLIPPER_REF>
 
-Modern Moonraker auto-detects and manages updates for itself and Klipper — no explicit `[update_manager]` entries needed for these two. They appear in the Mainsail update panel automatically.
+[update_manager moonraker]
+pinned_commit: <MOONRAKER_REF>
+```
+
+so the panel offers no Klipper or Moonraker update until a release moves the pin. A
+click on Klipper's update used to move the host off the commit the Pico firmware was
+built from. Moving a pin means: run `make klipper-drift` (see
+[08-image-building.md](08-image-building.md#release-pins-and-the-drift-check)), change
+the commit, and name the Pico re-flash (`stitchlab-flash-pico --uart`) in the release
+notes when `KLIPPER_REF` moved. Today a new pin reaches machines with a new image
+only; see [Not update-managed](#not-update-managed) for the way without a reflash.
+
+Modern Moonraker auto-detects Klipper and itself; the two sections above only
+override `pinned_commit`, which Moonraker allows (as `channel` and `refresh_interval`).
 
 > **Note:** Do not add `type: git_repo` entries for klipper or moonraker. Older Moonraker versions required explicit entries, but current versions auto-detect these components. Adding manual entries causes "Unparsed config option" warnings because the built-in updater ignores `git_repo`-specific options.
+
+### Versions and tags
+
+Moonraker names a `git_repo` version after `git describe --tags`. The image used to
+clone shallow without tags, so the panel of the 20260927 image read `v0.0.0-1` for
+Klipper, Moonraker, TurtleStitch and stitchlabos. Since beta6
+`stitchlab-clone-at-ref` deepens each clone to the nearest version tag of the pinned
+commit and fetches that tag (Klipper shows `v0.13.0-786-g461c4e37`, Moonraker
+`v0.11.0-3-g9e676eba`), and CI ships TurtleStitch with its nearest version tag.
+
+StitchLAB repos carry the release's tag: before tagging `vX` in this repo, tag
+`prntr/stitchlabos-config` and `prntr/turtlestitch` with the same `vX` at the commits
+this repo pins (the submodule commits). The image build fails early on a release tag
+when one is missing and prints the two commands. The tag must be a version Moonraker
+can read: `v0.1.0-beta.6` works, `v2.17.0-stitchlab.16` (the Mainsail scheme) does not
+for a `git_repo`. With `channel: beta` only tagged commits reach machines; a fix
+between images is a new tag in that repo, for example `v0.1.0-beta.7`.
 
 ---
 
@@ -165,7 +197,10 @@ The symlink at `~/moonraker/moonraker/components/wifi_manager.py` appears as an 
 
 ### Moonraker and Klipper
 
-No action needed. Deployed machines pull from upstream directly.
+Nothing reaches deployed machines by itself (pinned). The weekly drift check
+(`.github/workflows/klipper-drift.yml`, also on every release tag) runs our configs
+and sample jobs at the pin and at upstream master and lists the upstream commits
+that touch the G-code path; read its report before moving a pin.
 
 ### TurtleStitch
 
@@ -278,13 +313,15 @@ Once pushed, CI builds the dist, creates a GitHub Release, and deployed machines
 ### Releasing a new StitchLabOS image
 
 ```
-1. All component forks are at the desired versions
-2. git tag v1.2.0 on StitchlabOS/main
+1. All component forks are at the desired versions; run make klipper-drift
+2. Tag prntr/stitchlabos-config and prntr/turtlestitch with v1.2.0 at the pinned
+   submodule commits, push both tags
+3. git tag v1.2.0 on StitchlabOS/main
 3. image build CI triggers:
    - Builds prntr/mainsail from submodule source (`npm ci && npm run build`)
    - Clones prntr/turtlestitch
    - Clones prntr/stitchlabos-config
-   - Clones Klipper + Moonraker from upstream
+   - Clones Klipper + Moonraker at the pins in upstream-pins.conf
    - Packages into StitchLabOS-v1.2.0.img.xz
 4. GitHub Release created with image artifact
 ```
@@ -308,12 +345,36 @@ These items enable the full OTA update path:
 
 ---
 
+## Not update-managed
+
+What the image installs outside the five panel rows, and the proposed path
+(status beta6, 2026-10-07; nothing in this table moves with an update today):
+
+| Part | Where on the Pi | Proposed path |
+|---|---|---|
+| G-code intake (core, CLI, venv) | `/home/pi/stitchlab_intake`, `/usr/local/bin/stitchlab-gcode-intake` | Move into `stitchlabos-config` next to its Moonraker wrapper, venv via the update_manager `virtualenv`/`requirements` options. Today a config update can change the wrapper while the core stays at the image's version |
+| `stitchlab_ws_tuning.py` (Moonraker component) | `/usr/local/lib/stitchlabos/moonraker/` | Move into `stitchlabos-config/moonraker/components/`, like `wifi_manager.py` |
+| `live_jogd` (daemon, venv, unit, udev rule) | `/home/pi/live_jogd`, `/etc/systemd/system/live_jogd.service` | Own repo or `stitchlabos-config` subfolder with `managed_services: live_jogd` (already in `moonraker.asvc`); unit and udev rule stay image files |
+| Pico tools `stitchlab-flash-pico`, `stitchlab-uf2-clear-app` | `/usr/local/bin` | Into `stitchlabos-config/bin`, linked like the Wi-Fi scripts |
+| SKR Pico firmware | `/home/pi/firmware/` | Changes only when `KLIPPER_REF` moves. Moving the pin without a reflash needs the firmware too: a `zip`-type update_manager entry on this repo's release assets, or pins only move with images (today) |
+| Klipper/Moonraker pins | `moonraker.conf` (image seed) | Move the two `[update_manager …] pinned_commit` sections into an include from `stitchlabos-config`, so a tagged config release can move the pin (with the firmware above) |
+| `mainsail-config` (`mainsail.cfg`) | `/home/pi/mainsail-config`, pinned `MAINSAIL_CONFIG_REF` | Keep pinned: the machine's PAUSE/RESUME replace its macros. Optionally an update_manager row with `pinned_commit` to show its version |
+| Image scripts and system files (Avahi, sshd, nginx sites, sysctl, systemd drop-ins, sudoers, `stitchlab-first-boot-name`, `stitchlab-configure-avahi`, `stitchlab-clone-at-ref`) | `/etc`, `/usr/local` | Stay image-only: they need root or run once at build or first boot |
+| `printer.cfg`, `moonraker.conf` | `~/printer_data/config` | User-owned seeds; the variant part of `printer.cfg` is wissen D-073 |
+| KIAUH, AccessPopup | `/home/pi/kiauh`, `/home/pi/AccessPopup` | Leave as is |
+
+`[update_manager stitchlabos]` has `managed_services:` empty, so a config update loads
+new macros and Moonraker components only after the next Klipper or Moonraker
+restart. `managed_services: klipper moonraker` would restart both after an update;
+check on a machine that Moonraker refuses the update while a job runs before
+changing it.
+
 ## What already works today
 
-- Klipper and Moonraker OTA updates via Mainsail panel (auto-detected, no explicit config needed) ✓
+- Klipper and Moonraker in the Mainsail panel with real versions, pinned to the release (beta6) ✓
 - Mainsail OTA pulls from `prntr/mainsail` fork (latest release: `v2.17.0-stitchlab.2`) ✓
-- TurtleStitch OTA updates via Mainsail panel ✓
-- StitchLabOS config OTA updates via `prntr/stitchlabos-config` ✓
+- TurtleStitch OTA updates via Mainsail panel, tagged releases only (channel beta) ✓
+- StitchLabOS config OTA updates via `prntr/stitchlabos-config`, tagged releases only (channel beta) ✓
 - CI on `prntr/mainsail`: auto-builds and publishes GitHub Release on push to `stitchlabos/*` ✓
 - Image build CI on StitchlabOS main ✓
 - All Moonraker warnings resolved (polkit, dirty repos, untracked files) ✓

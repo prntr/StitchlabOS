@@ -10,13 +10,17 @@
 | Wrong instance | `mainsail/public/config.json` |
 | Changes don't apply | Service worker cache - hard refresh or clear site data |
 | WS reconnects repeatedly in AP mode | Three-layer fix (brcmfmac + Moonraker ping + frontend keepalive) baked into Beta2 — see [AP runbook Issue 5](runbooks/ap-troubleshooting.md#issue-5-frontend-websocket-reconnects-in-ap-mode) |
+| Moonraker shows its own version as `?`, Update Manager lists repos as `v0.0.0-1` | Cosmetic. The image clones Klipper, Moonraker and the other repos shallow, so `git describe` finds no tag. `/etc/stitchlabos_version` names the image; Mainsail's host panel shows it as *StitchLabOS …* |
 
 ## Controller Menu / WebSocket
 
 | Symptom | Cause |
 |---------|-------|
-| Shows disconnected | Expected: WebSocket :7150 not implemented yet |
-| WS errors in console | Use CLI: `KlipperLiveControl/live_jogd/dongle_api.py` |
+| Shows disconnected | `live_jogd` is not running — click **Connect Controller** in the Controller menu to start the service. The daemon is installed but not auto-started. |
+| "Service 'live_jogd' not installed" | First verify `/home/pi/printer_data/moonraker.asvc` contains `live_jogd`. If it does, Moonraker did not see the unit at startup: it only lists *loaded* units, and an inactive `static` unit stays loaded only through `/etc/systemd/system/moonraker.service.d/stitchlab-live-jogd.conf`. Check `systemctl show -p LoadState --value live_jogd.service` (expected `loaded`), restore the drop-in if missing, run `sudo systemctl daemon-reload`, then restart Moonraker. |
+| Live Control switches off by itself | A sustained controller-link gap exceeded `LIVE_CONTROL_LINK_TIMEOUT_S` (2.0 s by default), or a service/client reset disabled the safety gate. Check `journalctl -u live_jogd | grep -E 'sustained link timeout|Serial read error|CRC mismatch'`. Short gaps above `LINK_TIMEOUT_S` (200 ms) should only zero/block motion, not flip the Live Control switch off. |
+| Motion blocked after enabling Live Control | Check the block-reason text below the Live Control toggle. Common causes: `link_inactive`, no active controller selected, controller type still set to "Unknown", machine not homed, printer busy, or Live Control disabled. |
+| WS errors in console | Confirm the service is running and port `7150` is listening; then check `journalctl -u live_jogd -f`. While the service runs, the Controller menu shows the dongle's info, status and peers (live_jogd polls them every 5 s). `dongle_api.py` is for a stopped service only: it opens the dongle port a second time and drops the daemon's frames. |
 
 ## Embroidery Panel
 
@@ -48,11 +52,21 @@ tail -20 /home/pi/printer_data/logs/klippy.log
 ls -la /dev/stitchlab-dongle
 
 # Check live_jogd status
+systemctl is-enabled live_jogd       # expected: static
+systemctl is-active live_jogd || true # expected: inactive until Controller menu starts it
 sudo systemctl status live_jogd
 journalctl -u live_jogd -f
 
-# Query dongle directly
-python dongle_api.py --query status
+# Check Moonraker service-control prerequisites
+grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo allowed
+systemctl show -p LoadState --value live_jogd.service   # expected: loaded
+ss -ltnp | grep ':7150'              # only while live_jogd is active
+
+# Query dongle directly — only with live_jogd stopped; a second process on
+# the port drops the daemon's joystick frames
+sudo systemctl stop live_jogd
+cd /home/pi/live_jogd
+./venv/bin/python3 dongle_api.py --query status
 ```
 
 ## G-Code Studio Viewer
@@ -74,4 +88,3 @@ See [Components: G-Code Studio](components/gcode-studio.md) for verification.
 | Token expired / rejected | Generate a new token via `npx @jason.today/webmcp --new` |
 | Tools return empty data | Ensure Moonraker is connected (check Mainsail shows printer status, not "Connecting...") |
 | `Failed to load webmcp.js` | CDN unreachable — check internet connection, or host `webmcp.js` locally in `mainsail/public/lib/` |
-

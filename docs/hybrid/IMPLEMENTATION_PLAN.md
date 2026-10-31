@@ -1,6 +1,8 @@
 # StitchLAB Hybrid — Implementation Plan
 
 > Phased roadmap from current state to fully functional hybrid embroidery/sewing machine.
+>
+> **Scope:** Everything in this plan applies to the **Hybrid model only**. The base StitchLAB embroidery machine has a fixed gantry and does not need gantry detection, mode switching, foot-pedal sewing, or any of the safety guards described below. All Hybrid-specific Klipper config lives in a separate `hybrid_macros.cfg` (see [POGO_CONNECTOR.md → Build Integration](POGO_CONNECTOR.md#build-integration)) that is only included on Hybrid image builds.
 
 ## Dependency Graph
 
@@ -58,22 +60,26 @@ Everything listed here is already built and working.
 | Task | Detail | Output |
 |------|--------|--------|
 | Select pogo connector | 12-pin, 2.54mm pitch, spring-loaded | Part number + datasheet |
-| Design gantry PCB | Sense bridge resistor (1kΩ), pad layout for pogo contact | KiCad schematic + PCB |
-| Wire sense pins to SKR Pico | GPIO_SENSE_OUT → Pin 11, GPIO_SENSE_IN ← Pin 12 | Tested on breadboard |
-| Verify sense loop | HIGH when mated, LOW when unmated, no bounce | Test report |
+| Design gantry PCB | Pin 11 tied to GND (pin 10), pad layout for pogo contact | KiCad schematic + PCB |
+| Wire sense pin to SKR Pico | Pogo pin 11 → THB header (gpio27), pogo pin 10 → GND | Tested on breadboard |
+| Verify sense behavior | LOW when mated, HIGH (pull-up) when unmated, no bounce | Test report |
 
 **Deliverable:** Working sense circuit on breadboard, verified with multimeter and Klipper console.
 
 ### 1.2 Klipper: Gantry Detection
 
+> All entries below land in `hybrid_macros.cfg` (new file in `stitchlabos-config/printer_data/config/`), NOT in the shared `embroidery_macros.cfg`. The Hybrid `printer.cfg` adds `[include hybrid_macros.cfg]`.
+
 | Task | Detail | File |
 |------|--------|------|
-| Add `[gcode_button gantry_detect]` | GPIO pin, press/release gcode | `printer.cfg` |
-| Write `_GANTRY_DETACHED` macro | Disable XY, save mode, log | `embroidery_macros.cfg` |
-| Write `_GANTRY_ATTACHED` macro | Save mode, prompt homing | `embroidery_macros.cfg` |
-| Add `[save_variables]` | Persistent mode storage | `printer.cfg` |
-| Write `_VALIDATE_MODE_ON_STARTUP` | Correct mismatch at boot | `embroidery_macros.cfg` |
-| Write `QUERY_MODE` | Display current mode and gantry state | `embroidery_macros.cfg` |
+| Create `hybrid_macros.cfg` | New file in stitchlabos-config | `hybrid_macros.cfg` |
+| Add `[gcode_button gantry_detect]` | `pin: ^gpio27`, press/release gcode | `hybrid_macros.cfg` |
+| Write `_GANTRY_DETACHED` macro | Disable XY, save mode, log | `hybrid_macros.cfg` |
+| Write `_GANTRY_ATTACHED` macro | Save mode, prompt homing | `hybrid_macros.cfg` |
+| Add `[save_variables]` | Persistent mode storage | `hybrid_macros.cfg` |
+| Write `_VALIDATE_MODE_ON_STARTUP` | Correct mismatch at boot | `hybrid_macros.cfg` |
+| Write `QUERY_MODE` | Display current mode and gantry state | `hybrid_macros.cfg` |
+| Update build script | Symlink `hybrid_macros.cfg` only when `STITCHLABOS_VARIANT=hybrid` | `start_chroot_script` |
 
 **Deliverable:** Detaching gantry instantly disables XY steppers. Reattaching prompts for homing.
 
@@ -81,8 +87,8 @@ Everything listed here is already built and working.
 
 | Task | Detail | File |
 |------|--------|------|
-| Write `_REQUIRE_EMBROIDERY_MODE` | Guard macro, raises error if sewing | `embroidery_macros.cfg` |
-| Add guard to `EMBROIDERY_HOME` | Refuse to home XY in sewing mode | `embroidery_macros.cfg` |
+| Write `_REQUIRE_EMBROIDERY_MODE` | Guard macro, raises error if sewing | `hybrid_macros.cfg` |
+| Add guard to `EMBROIDERY_HOME` | Refuse to home XY in sewing mode — call `_REQUIRE_EMBROIDERY_MODE` from the existing macro in `embroidery_macros.cfg`; the guard macro itself is a no-op on base builds where `hybrid_macros.cfg` isn't loaded (define a stub in `embroidery_macros.cfg`) | `embroidery_macros.cfg` + `hybrid_macros.cfg` |
 | Verify STITCH/NEEDLE_TOGGLE in both modes | These should work (Z-only) | Test |
 
 **Deliverable:** XY commands blocked in sewing mode, Z commands work in both.
@@ -243,9 +249,9 @@ Everything listed here is already built and working.
 
 ### Pogo Connector Contact Order
 
-**Critical physical design requirement:** The sense pins (11, 12) should be the shortest pogo pins or positioned to **make contact last and break contact first**. This ensures:
+**Critical physical design requirement:** The sense pin (11) should be the shortest pogo pin or positioned to **make contact last and break contact first**. This ensures:
 
-1. On attach: power and signal pins connect before sense reports "attached"
-2. On detach: sense reports "detached" before power/signal pins disconnect
+1. On attach: signal pins connect before sense reports "attached"
+2. On detach: sense reports "detached" before signal pins disconnect
 
-This can be achieved by making sense pins 0.5mm shorter than signal pins, or by positioning them at the edges of the connector where mechanical separation happens first.
+This can be achieved by making the sense pin 0.5mm shorter than signal pins, or by positioning it at the edge of the connector where mechanical separation happens first.

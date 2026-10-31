@@ -10,8 +10,24 @@
 | 8080 | Vite dev server | `mainsail/vite.config.ts` | Y | - | Dev only |
 | 8110 | Webcam simulator | `virtual-klipper-printer/docker-compose.yml` | Y | - | MJPG stream |
 | 3000 | TurtleStitch offline | `/etc/nginx/sites-available/turtlestitch` | - | Y | Nginx serves static |
-| 7150 | live_jogd WebSocket | UI expects it | - | - | **Not implemented** |
+| 7150 | live_jogd WebSocket | `live_jogd.py` | - | Y | Installed but not auto-started — the Mainsail Controller menu starts the service via Moonraker on demand. |
 | — | WebMCP bridge | `MCP/.mcp.json` / `npx @jason.today/webmcp` | Y | - | Dev only, localhost WS for AI agents |
+
+## Controller Service Control
+
+`live_jogd` is intentionally installed-but-inactive. The Controller menu starts and stops it through Moonraker service control, then connects the browser to `ws://<host>:7150` only after the daemon is listening.
+
+Required runtime pieces on the Pi:
+
+| Item | Expected |
+|------|----------|
+| systemd unit | `live_jogd.service` is `static`, not enabled at boot |
+| Moonraker allow-list | `/home/pi/printer_data/moonraker.asvc` contains `live_jogd` |
+| Unit loaded for Moonraker | `moonraker.service.d/stitchlab-live-jogd.conf` present; `live_jogd.service` LoadState `loaded` |
+| Python deps | `/home/pi/live_jogd/venv` has `pyserial`, `aiohttp`, `websockets` |
+| WebSocket | `0.0.0.0:7150` listens only while `live_jogd` is active |
+
+Live Control is a separate safety gate inside `live_jogd`: service running means status/pairing is available, not that motion is enabled. Short active-controller frame gaps (`LINK_TIMEOUT_S`, default 200 ms) zero motion and block commands; sustained gaps (`LIVE_CONTROL_LINK_TIMEOUT_S`, default 2.0 s) disable Live Control.
 
 ## Klipper Macros
 

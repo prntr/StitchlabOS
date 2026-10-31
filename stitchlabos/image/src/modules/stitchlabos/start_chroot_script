@@ -15,15 +15,29 @@ apt-get install -y avahi-daemon
 
 # Unpack system config files (dnsmasq-shared.d, etc.)
 unpack /filesystem/etc /etc root
+# The WiFi manager's sudo rule: sudo ignores a drop-in with the wrong mode, and
+# a broken one locks sudo for everyone, so fail the build instead.
+chmod 0440 /etc/sudoers.d/020-stitchlab-wifi
+visudo -cf /etc/sudoers.d/020-stitchlab-wifi
+# Moonraker components under usr/local/lib/stitchlabos; symlinked below.
+unpack /filesystem/usr /usr root
 
-# Clone stitchlabos-config repo (wifi_manager, scripts, macros)
-# Keep .git intact so Moonraker update_manager can do git pull on deployed machines
-echo "Cloning stitchlabos-config..."
-sudo -u pi git clone --depth=1 https://github.com/prntr/stitchlabos-config.git /home/pi/stitchlabos-config
+# Clone stitchlabos-config (wifi_manager, intake glue, scripts, macros) at the
+# commit the meta-repo pins as a submodule, so a tag always rebuilds the same
+# image. stitchlab-clone-at-ref (klipper module) keeps `main` tracking
+# origin/main, which update_manager ([update_manager stitchlabos]) needs.
+: "${STITCHLABOS_CONFIG_REF:?not set - CI passes the stitchlabos-config submodule commit (build-image.yml)}"
+echo "Cloning stitchlabos-config at ${STITCHLABOS_CONFIG_REF}..."
+sudo -u pi /usr/local/bin/stitchlab-clone-at-ref https://github.com/prntr/stitchlabos-config.git main \
+    "${STITCHLABOS_CONFIG_REF}" /home/pi/stitchlabos-config
 
 # Create symlinks from stitchlabos-config to expected locations
 ln -sf /home/pi/stitchlabos-config/moonraker/components/wifi_manager.py \
     /home/pi/moonraker/moonraker/components/wifi_manager.py
+ln -sf /home/pi/stitchlabos-config/moonraker/components/stitchlab_intake.py \
+    /home/pi/moonraker/moonraker/components/stitchlab_intake.py
+ln -sf /usr/local/lib/stitchlabos/moonraker/stitchlab_ws_tuning.py \
+    /home/pi/moonraker/moonraker/components/stitchlab_ws_tuning.py
 ln -sf /home/pi/stitchlabos-config/printer_data/config/embroidery_macros.cfg \
     /home/pi/printer_data/config/embroidery_macros.cfg
 for script in wifi_status.sh wifi_scan.sh wifi_profiles.sh; do
@@ -42,25 +56,135 @@ if ! grep -q '\[wifi_manager\]' /home/pi/printer_data/config/moonraker.conf 2>/d
     echo "[wifi_manager]" >> /home/pi/printer_data/config/moonraker.conf
 fi
 
-# Configure Avahi for wlan0 only (prevents mDNS issues in AP mode)
-if [ -f /etc/avahi/avahi-daemon.conf ]; then
-    sed -i 's/^#allow-interfaces=.*/allow-interfaces=wlan0/' /etc/avahi/avahi-daemon.conf
-    sed -i 's/^#enable-reflector=no/enable-reflector=yes/' /etc/avahi/avahi-daemon.conf
-    # If allow-interfaces line doesn't exist, add it
-    if ! grep -q '^allow-interfaces=' /etc/avahi/avahi-daemon.conf; then
-        sed -i '/^\[server\]/a allow-interfaces=wlan0' /etc/avahi/avahi-daemon.conf
-    fi
+# Add [stitchlab_intake] to moonraker.conf if not present
+if ! grep -q '\[stitchlab_intake\]' /home/pi/printer_data/config/moonraker.conf 2>/dev/null; then
+    echo "" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# === STITCHLABOS: G-Code Intake ===" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# Pre-flight G-code compatibility checks + cached stick-job thumbnails." >> /home/pi/printer_data/config/moonraker.conf
+    echo "[stitchlab_intake]" >> /home/pi/printer_data/config/moonraker.conf
+    echo "cli_path: /usr/local/bin/stitchlab-gcode-intake" >> /home/pi/printer_data/config/moonraker.conf
+    echo "hoops_config: /home/pi/stitchlab_intake/hoops.json" >> /home/pi/printer_data/config/moonraker.conf
+    echo "gcodes_root: /home/pi/printer_data/gcodes" >> /home/pi/printer_data/config/moonraker.conf
+    echo "worker_nice: 10" >> /home/pi/printer_data/config/moonraker.conf
+    echo "worker_ionice: idle" >> /home/pi/printer_data/config/moonraker.conf
+    echo "analyze_timeout: 60" >> /home/pi/printer_data/config/moonraker.conf
+    echo "prepare_timeout: 30" >> /home/pi/printer_data/config/moonraker.conf
 fi
+
+# Add [stitchlab_ws_tuning] to moonraker.conf if not present
+if ! grep -q '\[stitchlab_ws_tuning\]' /home/pi/printer_data/config/moonraker.conf 2>/dev/null; then
+    echo "" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# === STITCHLABOS: WebSocket ping tuning ===" >> /home/pi/printer_data/config/moonraker.conf
+    echo "# Tolerates Wi-Fi jitter in AP mode; see docs/runbooks/ap-troubleshooting.md Issue 5." >> /home/pi/printer_data/config/moonraker.conf
+    echo "[stitchlab_ws_tuning]" >> /home/pi/printer_data/config/moonraker.conf
+    echo "websocket_ping_interval: 30" >> /home/pi/printer_data/config/moonraker.conf
+    echo "websocket_ping_timeout: 25" >> /home/pi/printer_data/config/moonraker.conf
+fi
+
+# Avahi on wlan0 and eth0 with the reflector off (each network sees only the
+# address it can reach; see the script's header) and IPv4 only:
+# nginx and Moonraker serve IPv4 only, so an announced IPv6 address only
+# produced refused connections (workshop 2026-10-06). sshd is IPv4-only too
+# (etc/ssh/sshd_config.d/10-stitchlab-ipv4-only.conf, unpacked above).
+chmod 0755 /usr/local/sbin/stitchlab-configure-avahi
+/usr/local/sbin/stitchlab-configure-avahi /etc/avahi/avahi-daemon.conf
 
 # Set default hostname (user can override via Pi Imager)
 echo "${STITCHLABOS_HOSTNAME}" > /etc/hostname
 sed -i "s/127.0.1.1.*/127.0.1.1\t${STITCHLABOS_HOSTNAME}/" /etc/hosts
+# On the first boot, stitchlab-first-boot-name appends the board serial's last
+# four hex digits to this name and to the fallback AP's SSID, so machines in
+# one room do not collide (beta5 proposal §1–2).
+chmod 0755 /usr/local/sbin/stitchlab-first-boot-name
+# stitchlab-rename: the first-boot name and any later rename, everywhere at once.
+chmod 0755 /usr/local/sbin/stitchlab-rename
+systemctl enable stitchlab-first-boot-name.service
+
+# Ensure the baked-in pi account is interactive. Some Raspberry Pi OS images
+# keep the first user on nologin until userconf-pi runs on first boot.
+if ! id -u pi >/dev/null 2>&1; then
+    useradd -m -s /bin/bash pi
+else
+    usermod -s /bin/bash pi
+fi
+usermod -aG sudo,dialout,tty,video pi
 
 # Set default password for pi user ("lab") so SSH works out-of-box
 echo "pi:lab" | chpasswd
 
 # Enable SSH for headless access
 systemctl enable ssh
+
+# Raspberry Pi's cloud-init dropped its netplan_nm_patch module in
+# 25.2-1~bpo13+1+rpt19 but still lists it in /etc/cloud/cloud.cfg, so every
+# boot ends "degraded done" (raspberrypi/trixie-feedback#45). cloud.cfg is a
+# dpkg conffile: editing it would stop the next cloud-init upgrade at a prompt.
+# Re-declare each affected module list in a drop-in instead, and only while the
+# module is really missing, so an upstream fix turns this into a no-op.
+python3 - <<'EOF'
+import importlib.util
+import yaml
+from cloudinit import util
+
+MODULE = "netplan_nm_patch"
+DROPIN = "/etc/cloud/cloud.cfg.d/90_stitchlabos-cloud-modules.cfg"
+
+def name(entry):
+    return entry[0] if isinstance(entry, list) else entry
+
+if importlib.util.find_spec("cloudinit.config.cc_" + MODULE):
+    print(f"cloud-init ships cc_{MODULE}; nothing to do")
+    raise SystemExit(0)
+with open("/etc/cloud/cloud.cfg") as f:
+    base = yaml.safe_load(f)
+lists = {
+    key: [e for e in base[key] if name(e) != MODULE]
+    for key in ("cloud_init_modules", "cloud_config_modules", "cloud_final_modules")
+    if any(name(e) == MODULE for e in base.get(key) or [])
+}
+if not lists:
+    print(f"cloud.cfg does not list {MODULE}; nothing to do")
+    raise SystemExit(0)
+with open(DROPIN, "w") as f:
+    f.write(f"# StitchLabOS: cloud.cfg lists {MODULE}, which this cloud-init does not ship.\n")
+    yaml.safe_dump(lists, f, default_flow_style=False, sort_keys=True)
+merged = util.read_conf_with_confd("/etc/cloud/cloud.cfg")
+left = [k for k in lists if any(name(e) == MODULE for e in merged.get(k) or [])]
+if left:
+    raise SystemExit(f"{DROPIN} did not take effect: {MODULE} still in {left}")
+print(f"{DROPIN}: dropped {MODULE} from {sorted(lists)}")
+EOF
+
+# The base image's /boot/firmware/user-data is "#cloud-config" with comments
+# only. cloud-init rejects it as "empty cloud config", and every card written
+# without Imager customisation boots "degraded done" (2026-09-28 commissioning
+# run). Keep the comments and add one inert key; only while the file has no
+# content, so a base image that ships some turns this into a no-op. Imager
+# customisation and a hand-written user-data replace the file as before.
+USER_DATA=/boot/firmware/user-data
+if [ -f "$USER_DATA" ]; then
+    python3 - "$USER_DATA" <<'EOF_USERDATA'
+import sys
+import yaml
+
+path = sys.argv[1]
+with open(path) as f:
+    text = f.read()
+if yaml.safe_load(text):
+    print(f"{path} has content; nothing to do")
+    raise SystemExit(0)
+with open(path, "a") as f:
+    if not text.endswith("\n"):
+        f.write("\n")
+    f.write("\n# StitchLabOS: one key, so cloud-init does not reject this part as empty.\n")
+    f.write('final_message: "StitchLabOS: cloud-init finished after $UPTIME seconds"\n')
+with open(path) as f:
+    if not yaml.safe_load(f):
+        raise SystemExit(f"{path} is still empty")
+print(f"{path}: added final_message")
+EOF_USERDATA
+    cloud-init schema --config-file "$USER_DATA"
+fi
 
 # Enable UART for SKR Pico connection (GPIO14/15 ↔ Pico UART)
 # - enable_uart=1: activates the hardware UART on GPIO14/15
@@ -83,15 +207,13 @@ fi
 # Suppress Moonraker "untracked source files" warning for wifi_manager.py symlink.
 # .git/info/exclude provides local-only git ignore rules — never overwritten by git pull.
 echo "moonraker/components/wifi_manager.py" >> /home/pi/moonraker/.git/info/exclude
+echo "moonraker/components/stitchlab_intake.py" >> /home/pi/moonraker/.git/info/exclude
+echo "moonraker/components/stitchlab_ws_tuning.py" >> /home/pi/moonraker/.git/info/exclude
 
-# Patch Moonraker's Tornado WebSocket ping settings to tolerate Wi-Fi jitter in AP mode.
-# Default (interval=10, timeout=25-ish) disconnects browsers when the client radio briefly
-# parks and misses a PING. 30/25 gives the client a full ping cycle to reply.
-# See docs/runbooks/ap-troubleshooting.md Issue 5 for the diagnostic trail.
-if ! grep -q 'websocket_ping_timeout' /home/pi/moonraker/moonraker/components/application.py; then
-    sed -i "s|'websocket_ping_interval': None if tornado_ver < (6, 5) else 10\\.|'websocket_ping_interval': None if tornado_ver < (6, 5) else 30., 'websocket_ping_timeout': None if tornado_ver < (6, 5) else 25.|" \
-        /home/pi/moonraker/moonraker/components/application.py
-fi
+# Never edit Moonraker's tracked files here: update_manager refuses to update
+# a modified repo ("Update aborted, repo has been modified"). WebSocket ping
+# tuning is the stitchlab_ws_tuning component above; service control for the
+# inactive live_jogd unit is a moonraker.service drop-in in the live-jogd module.
 
 # Install post-Klipper Wi-Fi powersave-off unit (baked by filesystem/, just enable it)
 systemctl enable wlan0-powersave-off.service

@@ -1,0 +1,3 @@
+Firmware artifacts (klipper.bin, klipper.uf2, katapult.uf2) are written here by
+CI before the image build. They are deliberately not in git — see
+firmware/README.md and .github/workflows/build-image.yml.

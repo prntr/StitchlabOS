@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# StitchLabOS - stitchlab_intake Module
+# G-Code intake: compatibility check + Pillow-based thumbnail generator.
+# Phases 1-2 are CLI-only. Moonraker component and UI integration follow.
+
+set -e
+source /common.sh
+
+echo "=== StitchLabOS: Installing stitchlab_intake ==="
+
+# Pillow runtime libs. Wheels from piwheels cover armhf/arm64, but we
+# install the shared libs explicitly so the wheel's dlopen calls resolve
+# on a minimal Raspberry Pi OS Lite image.
+apt-get update
+apt-get install -y --no-install-recommends \
+    libjpeg62-turbo libopenjp2-7 libtiff6 zlib1g libfreetype6
+
+# Unpack module files
+unpack /filesystem/home/pi /home/pi pi
+unpack /filesystem/usr/local/bin /usr/local/bin root
+
+# Python venv (matches live_jogd pattern)
+cd ${STITCHLAB_INTAKE_DIR}
+sudo -u pi virtualenv -p python3 venv
+sudo -u pi ${STITCHLAB_INTAKE_DIR}/venv/bin/pip install --upgrade pip
+sudo -u pi ${STITCHLAB_INTAKE_DIR}/venv/bin/pip install -r requirements.txt
+
+chmod +x /usr/local/bin/stitchlab-gcode-intake
+
+echo "=== stitchlab_intake module complete ==="

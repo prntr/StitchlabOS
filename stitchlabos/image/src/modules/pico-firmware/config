@@ -1,0 +1,11 @@
+# pico-firmware Module Configuration
+# Ships prebuilt SKR Pico (RP2040) firmware plus the guided flash helper.
+#
+# The .uf2/.bin artifacts are NOT in git — CI builds them from
+# firmware/skr-pico/*.config and copies them into
+# filesystem/home/pi/firmware/ before the image build runs.
+
+export PICO_FIRMWARE_DIR="/home/pi/firmware"
+# Must match [mcu] in printer.cfg and CONFIG_SERIAL_BAUD in the seed configs.
+export PICO_FIRMWARE_SERIAL="/dev/serial0"
+export PICO_FIRMWARE_BAUD="115200"

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Shim that runs the stitchlab_intake CLI from the module's venv.
+set -e
+INTAKE_DIR="/home/pi/stitchlab_intake"
+# The package lives at ${INTAKE_DIR}; add its parent to PYTHONPATH so
+# `python -m stitchlab_intake.cli` resolves cleanly.
+export PYTHONPATH="/home/pi:${PYTHONPATH:-}"
+exec "${INTAKE_DIR}/venv/bin/python" -m stitchlab_intake.cli "$@"

@@ -18,12 +18,54 @@ systemctl status nginx moonraker klipper
 
 Bridges StitchLabDongle (USB) to Moonraker (HTTP).
 
+Runtime model:
+- Installed on every image, but intentionally not enabled at boot.
+- Plugging in the dongle starts it (udev `SYSTEMD_WANTS` in `99-stitchlab-dongle.rules`), also at boot with the dongle plugged in. Without a dongle the expected boot state is `static` + `inactive`.
+- The Mainsail Controller menu starts/stops it through Moonraker `machine.services.*`; opening the menu connects to a service that is already running. Stop holds until the next plug-in or boot.
+- Port `7150` only listens while the service is active.
+- Without `/dev/stitchlab-dongle` a start is skipped at once (`ConditionPathExists`): the unit stays `inactive`, never `failed`, however often it is clicked. There is no start limit; a crashing daemon restarts after 3 s, the delay growing to 5 minutes over five restarts.
+
 ```bash
+# Expected without a dongle (with one plugged in: active)
+systemctl is-enabled live_jogd       # static
+systemctl is-active live_jogd || true # inactive
+
+# Start/stop through Moonraker, same path used by Mainsail
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"service":"live_jogd"}' \
+  http://localhost:7125/machine/services/start
+
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"service":"live_jogd"}' \
+  http://localhost:7125/machine/services/stop
+
+# Runtime diagnostics
 systemctl status live_jogd
 journalctl -u live_jogd -f
+ss -ltnp | grep ':7150'
+ls -la /dev/stitchlab-dongle
 ```
 
-Install: `KlipperLiveControl/live_jogd/live_jogd.service`
+Service-control prerequisites:
+- `/home/pi/printer_data/moonraker.asvc` must contain `live_jogd`.
+- `live_jogd.service` must be *loaded* when Moonraker starts. Moonraker only lists loaded units, and an inactive `static` unit is loaded only while something references it; without that Moonraker reads `moonraker.asvc` but still answers `Service 'live_jogd' not installed`. The drop-in `/etc/systemd/system/moonraker.service.d/stitchlab-live-jogd.conf` (`Before=live_jogd.service`) provides the reference.
+- Moonraker's own files are never patched: `update_manager` refuses to update a modified repo. `git -C /home/pi/moonraker status --porcelain` must print nothing.
+
+```bash
+grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo allowed
+systemctl show -p LoadState --value live_jogd.service   # expected: loaded
+git -C /home/pi/moonraker status --porcelain            # expected: no output
+sudo systemctl daemon-reload && sudo systemctl restart moonraker
+```
+
+Python dependencies are installed into `/home/pi/live_jogd/venv` from `requirements.txt` and include `pyserial`, `aiohttp`, and `websockets`.
+
+Live Control timing:
+- `LINK_TIMEOUT_S=0.200` zeroes motion state and blocks movement promptly after a short active-controller frame gap.
+- `LIVE_CONTROL_LINK_TIMEOUT_S=2.0` disables the explicit Live Control gate after sustained link loss.
+- Serial errors or CRC mismatches can still indicate dongle/controller link noise and should be checked in `journalctl -u live_jogd`.
+
+Install source: `stitchlabos/image/src/modules/live-jogd/`
 
 ## TurtleStitch Offline
 
@@ -55,7 +97,7 @@ journalctl -u AccessPopup.service -n 30
 curl http://localhost:7125/server/wifi/status
 ```
 
-The `wifi_manager.py` Moonraker component lives in `/home/pi/moonraker/moonraker/components/`. It uses `nmcli` for all WiFi operations (requires `pi ALL=(ALL) NOPASSWD: ALL` in sudoers).
+The `wifi_manager.py` Moonraker component lives in `/home/pi/moonraker/moonraker/components/`. It uses `sudo -n nmcli` for all WiFi changes and, while `wlan0` runs the access point, `sudo -n /usr/sbin/iw dev wlan0 scan ap-force` for the network list (NetworkManager does not scan in AP mode). AP mode chosen in Mainsail stops `AccessPopup.timer` with `sudo -n /usr/bin/systemctl stop AccessPopup.timer`, so the timer does not switch back to a known network; leaving AP mode starts it again (`… start AccessPopup.timer`). The image allows exactly these in `/etc/sudoers.d/020-stitchlab-wifi`; `sudo -n -l` as `pi` must list all four. Images up to `20260927-814dd93` lack the two `systemctl` lines, so AP mode from Mainsail does not hold there. Images up to v0.1.0-beta.4 lack the file, so every WiFi change and the AP-mode scan fail there.
 
 ## SKR Pico (UART)
 

@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """
 Minimal dongle API client for querying the ESP32-C3 dongle over serial.
+
+Standalone tool: do not run it while live_jogd is active. It opens the
+dongle port a second time and flushes its input, which drops the frames
+live_jogd is reading. live_jogd talks to the dongle over its own
+connection instead (LiveJogDaemon._dongle_request).
 """
 
 import argparse
+import json
 import time
 import serial
 
@@ -14,6 +20,9 @@ from serial_protocol import (
     parse_dongle_info,
     parse_dongle_status,
     parse_peer_list,
+    dongle_info_to_dict,
+    dongle_status_to_dict,
+    peer_info_to_dict,
     QUERY_INFO,
     QUERY_STATUS,
     QUERY_PEERS,
@@ -85,6 +94,8 @@ def main():
                         help="Persist current dongle settings to NVS")
     parser.add_argument("--watch", type=float, default=0.0,
                         help="Poll interval in seconds (0 = once)")
+    parser.add_argument("--json", action="store_true",
+                        help="Output machine-readable JSON")
     args = parser.parse_args()
 
     if args.clear_peers:
@@ -131,34 +142,43 @@ def main():
             info = parse_dongle_info(data)
             if not info:
                 raise SystemExit("Failed to parse dongle info.")
-            print(f"MAC: {info.mac}")
-            print(f"FW: {info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}")
-            print(f"Channel: {info.esp_now_channel}")
-            print(f"WiFi: {'on' if info.wifi_enabled else 'off'}")
-            print(f"Controllers: {info.controller_count}")
-            print(f"LED brightness: {info.led_brightness}")
+            if args.json:
+                print(json.dumps(dongle_info_to_dict(info)))
+            else:
+                print(f"MAC: {info.mac}")
+                print(f"FW: {info.firmware_major}.{info.firmware_minor}.{info.firmware_patch}")
+                print(f"Channel: {info.esp_now_channel}")
+                print(f"WiFi: {'on' if info.wifi_enabled else 'off'}")
+                print(f"Controllers: {info.controller_count}")
+                print(f"LED brightness: {info.led_brightness}")
         elif args.query == "status":
             status = parse_dongle_status(data)
             if not status:
                 raise SystemExit("Failed to parse dongle status.")
-            print(f"Uptime: {status.uptime_ms} ms")
-            print(f"Packets RX: {status.packets_rx}")
-            print(f"Packets TX: {status.packets_tx}")
-            print(f"CRC errors: {status.crc_errors}")
-            print(f"Link: {status.link_status}")
-            print(f"Pairing: {status.pairing_mode}")
-            print(f"RSSI: {status.rssi}")
+            if args.json:
+                print(json.dumps(dongle_status_to_dict(status)))
+            else:
+                print(f"Uptime: {status.uptime_ms} ms")
+                print(f"Packets RX: {status.packets_rx}")
+                print(f"Packets TX: {status.packets_tx}")
+                print(f"CRC errors: {status.crc_errors}")
+                print(f"Link: {status.link_status}")
+                print(f"Pairing: {status.pairing_mode}")
+                print(f"RSSI: {status.rssi}")
         else:
             peers = parse_peer_list(data)
             if peers is None:
                 raise SystemExit("Failed to parse peers.")
-            if not peers:
+            if args.json:
+                print(json.dumps([peer_info_to_dict(peer) for peer in peers]))
+            elif not peers:
                 print("No peers.")
-            for peer in peers:
-                print(
-                    f"slot={peer.slot_id} mac={peer.mac} active={peer.active} "
-                    f"last_seen={peer.last_seen} packets={peer.packets}"
-                )
+            else:
+                for peer in peers:
+                    print(
+                        f"slot={peer.slot_id} mac={peer.mac} active={peer.active} "
+                        f"last_seen={peer.last_seen} packets={peer.packets}"
+                    )
 
         if args.watch <= 0:
             break

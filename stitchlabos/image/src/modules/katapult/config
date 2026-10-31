@@ -3,3 +3,6 @@
 
 export KATAPULT_REPO="https://github.com/Arksine/katapult.git"
 export KATAPULT_DIR="/home/pi/katapult"
+# Katapult commit to install: the one CI built katapult.uf2 from
+# (build-image.yml passes it), so flashtool.py matches the bootloader.
+export KATAPULT_REF="${KATAPULT_REF:-}"

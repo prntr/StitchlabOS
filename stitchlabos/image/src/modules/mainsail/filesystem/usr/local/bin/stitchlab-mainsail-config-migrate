@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+# StitchLabOS — one-shot migration for /home/pi/mainsail/config.json.
+#
+# Until Beta2 the served config used "port": 7125, which made browsers open
+# ws://<host>:7125/websocket directly and bypass nginx. From this image
+# onwards the bundled config has "port": null (same-origin via nginx).
+#
+# This script rewrites an existing on-disk config.json *only* when it still
+# matches the legacy StitchLab default. Any user-customised config (custom
+# hostname, multi-printer instances, non-default instancesDB, etc.) is left
+# untouched.
+
+import json
+import os
+import sys
+import tempfile
+
+CONFIG_PATH = "/home/pi/mainsail/config.json"
+
+LEGACY_DEFAULT = {
+    "hostname": None,
+    "port": 7125,
+    "path": None,
+    "instancesDB": "moonraker",
+    "instances": [],
+}
+
+
+def main() -> int:
+    if not os.path.exists(CONFIG_PATH):
+        return 0
+
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[mainsail-config-migrate] cannot read {CONFIG_PATH}: {exc}", file=sys.stderr)
+        return 0
+
+    if not isinstance(cfg, dict):
+        return 0
+
+    for key, expected in LEGACY_DEFAULT.items():
+        if cfg.get(key) != expected:
+            return 0
+
+    cfg["port"] = None
+
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="config.json.", dir=os.path.dirname(CONFIG_PATH))
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh, indent=4)
+            fh.write("\n")
+        os.chmod(tmp_path, 0o644)
+        try:
+            st = os.stat(CONFIG_PATH)
+            os.chown(tmp_path, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+        os.replace(tmp_path, CONFIG_PATH)
+    except OSError as exc:
+        print(f"[mainsail-config-migrate] write failed: {exc}", file=sys.stderr)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return 1
+
+    print(f"[mainsail-config-migrate] migrated {CONFIG_PATH}: port 7125 -> null")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

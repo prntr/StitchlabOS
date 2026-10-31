@@ -2,9 +2,17 @@
 
 > Integration docs for the StitchLAB workspace. Upstream project docs live in their repos.
 
+**Building or running a machine?** Start at the [README](../README.md), not here.
+Its getting-started path is the supported route, and the commissioning guide is
+attached to every release so it matches the image you downloaded. What follows
+is for people changing StitchLabOS itself.
+
 ## Start Here
 
+- [00 Ecosystem](00-ecosystem.md) - Every StitchLAB repo and what it does
+- [10 Roadmap](10-roadmap.md) - Classic → Hybrid → OpenRSS, and what is next
 - [01 Onboarding](01-onboarding.md) - What's here
+- [11 Commissioning](11-commissioning.md) - New machine: flash the card, bring up the Pico, verify
 - [03 Quickstart (Local)](03-quickstart-local.md) - Dev with simulator
 - [04 Quickstart (Dev Pi)](04-quickstart-pi.md) - Deploy to Pi
 
@@ -16,6 +24,7 @@
 - [07 Development Guidelines](07-development-guidelines.md) - Coding standards
 - [08 Image Building](08-image-building.md) - Build distributable images
 - [09 Update Strategy](09-update-strategy.md) - OTA updates, upstream sync, release cycle
+- [SKR Pico Firmware](../firmware/README.md) - Seed configs, the three builds, flashing
 
 ## Components
 
@@ -51,7 +60,7 @@
 
 ## AI Agent Integration
 
-- [WebMCP Setup](../MCP/webmcp/README.md) - Connect AI agents (Claude, Cursor, Codex) to the Mainsail UI via MCP
+- [WebMCP Setup](03-quickstart-local.md#4-optional-connect-an-ai-agent-via-webmcp) - Connect AI agents (Claude, Cursor, Codex) to the Mainsail UI via MCP
 
 ## External
 

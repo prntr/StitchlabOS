@@ -3,5 +3,8 @@
 
 export MAINSAIL_DIR="/home/pi/mainsail"
 export MAINSAIL_CONFIG_DIR="/home/pi/mainsail-config"
+# mainsail-config commit (mainsail.cfg: PAUSE/RESUME/CANCEL_PRINT macros):
+# MAINSAIL_CONFIG_REF in stitchlabos/image/upstream-pins.conf, passed by build-image.yml.
+export MAINSAIL_CONFIG_REF="${MAINSAIL_CONFIG_REF:-}"
 export NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 export NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"

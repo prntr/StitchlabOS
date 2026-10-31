@@ -1,0 +1,20 @@
+; drift: variants=image,hybrid
+; drift: expect=ok
+; The buttons of the embroidery panel, in the order a user presses them.
+G28
+_DRIFT_POS
+NEEDLE_TOGGLE
+_DRIFT_POS
+NEEDLE_TOGGLE
+_DRIFT_POS
+STITCH
+LOCK_STITCH COUNT=2
+_DRIFT_POS
+ZERO_NEEDLE_POSITION
+EMBROIDERY_HOME
+_DRIFT_POS
+PAUSE
+_DRIFT_POS
+RESUME
+_DRIFT_POS
+EMBROIDERY_STATUS

@@ -52,6 +52,48 @@ GPIO12          →      ENABLE
 - **Motor Power:** 12V or 24V (via main power input)
 - **Current:** Set via `run_current` in printer.cfg
 
+### Motor Coil Wiring
+Do not rely on wire colors alone. Stepper motor colors and connector pin order
+can vary between deliveries, even for visually similar NEMA17 motors. Identify
+the two coil pairs before wiring the motor to the SKR Pico.
+
+For the SKR Pico motor outputs, the pin order shown in the Voron/BTT pinout is:
+
+```text
+2B | 1B | 1A | 2A
+```
+
+This means the middle two pins are one coil (`1B`/`1A`) and the two outer pins
+are the other coil (`2B`/`2A`). Keep each motor coil on one driver phase; do not
+mix one wire from each coil on the same phase.
+
+Use a multimeter in resistance/continuity mode to find the coil pairs. For the
+StepperOnline 17HE15-1504S, the nominal phase resistance is about 2.3 ohm. Wires
+from the same coil show low resistance; wires from different coils show no
+continuity.
+
+StepperOnline's published color example for the 17HE15-1504S is:
+
+| Motor phase | Color |
+|-------------|-------|
+| A+          | Black |
+| A-          | Blue  |
+| B+          | Green |
+| B-          | Red   |
+
+If motor phase A is wired to SKR phase 1 and motor phase B is wired to SKR phase
+2, the SKR Pico connector order is:
+
+```text
+2B  | 1B   | 1A    | 2A
+Red | Blue | Black | Green
+```
+
+Treat this as an example only. Verify the actual motor before crimping or
+re-pinning the connector. If the motor turns in the wrong direction after the
+coils are correctly paired, invert `dir_pin` in Klipper or swap exactly one coil
+pair (`1A`/`1B` or `2A`/`2B`).
+
 ## Magnet Installation
 
 ### Magnet Specifications

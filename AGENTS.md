@@ -1,0 +1,109 @@
+# StitchLabOS (MainsailDev) — agent instructions
+
+`AGENTS.md` is the canonical instruction file for **every** agent (Claude Code, Codex,
+Mistral). `CLAUDE.md` is a symlink to it — edit `AGENTS.md` only, never the symlink.
+
+<!-- BEGIN _STD:SHARED_REFERENCES -->
+## Shared references
+
+- House rules and Code layout: `~/Code/_std/AGENTS.base.md`. Claude Code and Codex
+  load it as their global instructions; do not read it a second time. Only an agent
+  without a global instruction file reads it from here.
+- Delivery pipeline: `~/Code/active/plattform/pipeline.md`. Read it before deploying
+  or touching devices or the network; local-only work does not need it.
+
+This managed block is checked by `~/Code/_std/bin/agents-doctor`; keep its markers intact.
+<!-- END _STD:SHARED_REFERENCES -->
+
+## What this is
+
+A Raspberry Pi OS image that turns a Klipper machine into an embroidery system:
+Klipper, Moonraker, a customised Mainsail UI, TurtleStitch, WiFi with AP fallback,
+embroidery macros and the SKR Pico's own firmware in one flashable image. This folder
+is the meta-repo; the GitHub remote is `prntr/StitchlabOS`.
+
+The folder name is historical. This is not a Mainsail development checkout.
+
+## Where this sits
+
+StitchLAB is more than this repo. [`docs/00-ecosystem.md`](docs/00-ecosystem.md) maps
+every related project and says which one a given change belongs in;
+[`docs/10-roadmap.md`](docs/10-roadmap.md) says where the whole thing is going —
+including `OpenRSS`, the planned replacement for this software stack.
+
+Read those two before proposing work that spans repos.
+
+The machines this image runs on are registered in
+`~/Code/active/plattform/geraete/stitchlab.md`: hostnames (`stitchlab.local` is the
+image default, `stitchlab04` and `stitchlabdev` are named), consumers, open points.
+Nothing there is surveyed yet. A fact about a physical machine belongs there, not here.
+
+## Three submodules and one plain clone — check before committing
+
+| Folder | Kind | Upstream | Who owns it |
+|---|---|---|---|
+| `mainsail/` | **submodule** | mainsail-crew/mainsail | fork, our changes |
+| `turtlestitch/` | **submodule** | backface/turtlestitch | fork, our changes |
+| `stitchlabos-config/` | **submodule** | prntr | ours |
+| `virtual-klipper-printer/` | plain clone, gitignored | mainsail-crew | upstream, for testing |
+
+The three submodules are registered in `.gitmodules` and CI checks them out with
+`submodules: recursive`. A commit here records only the submodule *pointer*, never the
+content — the actual change has to be committed inside that folder and pushed, or the
+next CI build uses the old commit.
+
+`virtual-klipper-printer/` is genuinely outside version control here.
+
+`make status` prints branch and dirty count for all five at once. Commit in the folder
+you actually edited.
+
+## Commands
+
+| | |
+|---|---|
+| `make setup` | `npm ci` in `mainsail/` |
+| `make dev` | serve the Mainsail UI locally |
+| `make sim` | start the virtual Klipper printer (Docker) |
+| `make test` | `test-intake`, `test-pico`, `test-wifi`, `test-jogd` and `test-image`, then Mainsail's Cypress E2E suite — slow, needs a browser |
+| `make test-intake` | pytest for the G-code intake module, via `uv` on Python 3.13 — fast, no hardware |
+| `make test-pico` | pytest for the Pico flash tools (`stitchlab-flash-pico`, `stitchlab-uf2-clear-app`) — fast, no hardware |
+| `make test-wifi` | pytest for the Wi-Fi manager (Moonraker component and scripts in `stitchlabos-config`) — fast, no NetworkManager |
+| `make test-jogd` | pytest for the `live_jogd` daemon against a fake serial port — fast, no dongle |
+| `make test-image` | pytest for the image scripts (`stitchlabos` module: first-boot name, `stitchlab-rename`, Avahi; `klipper` module: `stitchlab-clone-at-ref` against local repos; the drift check's evaluation) — fast, no Pi, no network |
+| `make klipper-drift` | our configs and sample jobs through klippy batch mode at the pins in `stitchlabos/image/upstream-pins.conf` and at upstream master — Docker and network, not part of `make check` |
+| `make lint` | Mainsail's linter + dead links in `docs/` |
+| `make check` | `lint` + `test` — the gate before any commit |
+| `make status` | state of all nested repos |
+
+## The image is not built locally
+
+CustomPiOS builds it on GitHub Actions; pushing a `v*` tag produces the `.img.xz`
+release artefact plus `os_list.json` and the SKR Pico firmware. Do not attempt a local
+image build. Build details: [`docs/08-image-building.md`](docs/08-image-building.md).
+
+## Two things that silently break a release
+
+**Every module must be listed in `MODULES`.** A module directory under
+`stitchlabos/image/src/modules/` that is not named in
+`stitchlabos/image/src/config` is simply never built. Beta1 shipped a
+`moonraker.conf` pointing at a CLI from a module that was not in the list.
+
+**Every published URL must resolve.** Beta1's `os_list.json` referenced an asset
+name that was never uploaded. `os_list.json` is now generated per release from
+`os_list.template.json`. The workflow creates each release as a draft, checks
+the uploaded assets against `os_list.json` through the API, and only then
+publishes; if a public URL still fails afterwards it turns the release back into
+a draft so `/releases/latest/` falls back. Do not reintroduce a checked-in
+`os_list.json`, and do not publish the release directly.
+
+**Every tag is a regular release, never a prerelease.** GitHub excludes
+prereleases from `/releases/latest/`, and README, docs and `os_list.json` users
+depend on `releases/latest/download/os_list.json`. Beta1 was a prerelease and
+that URL was a 404 for months. The workflow pins `prerelease: false` on purpose.
+
+## What must NOT happen here
+
+- Do not commit changes to the nested repos from this folder.
+- Do not pull upstream into the forks without checking our patches first.
+- Do not commit firmware binaries. `firmware/skr-pico/*.config` are the sources;
+  CI builds the `.bin`/`.uf2` and `.gitignore` keeps them out.

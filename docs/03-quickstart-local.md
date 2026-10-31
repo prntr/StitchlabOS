@@ -52,6 +52,6 @@ Then:
 2. Paste the token into the blue widget in Mainsail
 3. The agent can now read printer state, send G-code, query config, and more
 
-See [MCP/webmcp/README.md](../MCP/webmcp/README.md) for available tools and detailed setup.
+See the [WebMCP README](https://github.com/jasonjmcghee/webmcp#readme) for available tools and detailed setup.
 
 See [05-configuration.md](05-configuration.md) for all ports and endpoints.

@@ -4,10 +4,16 @@
 # Klipper repository
 export KLIPPER_REPO="https://github.com/Klipper3d/klipper.git"
 export KLIPPER_BRANCH="master"
+# Klipper commit to install: the one CI built the SKR Pico firmware from
+# (build-image.yml passes it). Host and MCU must run the same commit.
+export KLIPPER_REF="${KLIPPER_REF:-}"
 
 # Moonraker repository
 export MOONRAKER_REPO="https://github.com/Arksine/moonraker.git"
 export MOONRAKER_BRANCH="master"
+# Moonraker commit to install: MOONRAKER_REF in stitchlabos/image/upstream-pins.conf
+# (build-image.yml passes it). Klipper's commit comes from the same file.
+export MOONRAKER_REF="${MOONRAKER_REF:-}"
 
 # Installation paths
 export KLIPPER_DIR="/home/pi/klipper"

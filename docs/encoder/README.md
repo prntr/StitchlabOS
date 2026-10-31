@@ -19,6 +19,7 @@ The prototype was developed on stitchlab04.local (multi-motor simulator), but fo
 | [SYSTEM_GUIDE.md](SYSTEM_GUIDE.md) | Complete system guide - architecture, configuration, troubleshooting |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Multi-phase development roadmap and technical architecture |
 | [HARDWARE_WIRING.md](HARDWARE_WIRING.md) | Wiring diagrams for SKR Pico + AS5600 |
+| [MOTOR_WIRING_DE.md](MOTOR_WIRING_DE.md) | German manual addendum for SKR Pico stepper motor wiring |
 
 ## Hardware Setup
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=StitchLabOS: give a fresh card its own hostname and access point name
+Documentation=https://github.com/prntr/StitchlabOS/blob/main/docs/11-commissioning.md
+Documentation=file:/usr/local/sbin/stitchlab-first-boot-name
+# After cloud-init's local stage, which already applies a hostname from Imager
+# customisation; before NetworkManager reads the AP keyfile and before Avahi
+# announces the name, so the first announcement carries the final one.
+After=cloud-init-local.service
+Before=NetworkManager.service avahi-daemon.service
+ConditionPathExists=!/var/lib/stitchlabos/first-boot-name.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/stitchlab-first-boot-name
+
+[Install]
+WantedBy=multi-user.target

@@ -170,6 +170,14 @@ dns-sd -G v4 stitchlab.local
 ```
 
 **Pi-Side Avahi Config:**
+
+Images from `feat/cross-platform-stability` after `e803dbc` announce on `wlan0` and
+`eth0` with the reflector off (`stitchlab-configure-avahi`), so a machine on a LAN
+cable is reachable as `<name>.local` from the LAN too. If clients of the machine's
+own access point resolve the name to its LAN address, restrict Avahi to the AP
+interface as below; older images already run on `wlan0` only. Leave the reflector
+off: it is what relays the LAN address into the AP network.
+
 ```bash
 # Find which interface has the AP IP (usually `wlan0`, sometimes `uap0`)
 ip -4 -o addr show | grep '192.168.50.5'
@@ -184,9 +192,8 @@ grep -q '^allow-interfaces=' /etc/avahi/avahi-daemon.conf || sudo sed -i '/^use-
 # sudo sed -i 's/^deny-interfaces=.*/deny-interfaces=eth0/' /etc/avahi/avahi-daemon.conf || true
 # grep -q '^deny-interfaces=' /etc/avahi/avahi-daemon.conf || sudo sed -i '/^use-ipv6=yes/a deny-interfaces=eth0' /etc/avahi/avahi-daemon.conf
 
-# (Optional) Enable reflector for AP mode
-sudo sed -i 's/^#enable-reflector=no/enable-reflector=yes/' /etc/avahi/avahi-daemon.conf
-grep "enable-reflector" /etc/avahi/avahi-daemon.conf
+# Do not enable the reflector: it relays the LAN address into the AP network.
+grep "enable-reflector" /etc/avahi/avahi-daemon.conf   # expected: enable-reflector=no
 sudo systemctl restart avahi-daemon
 ```
 
@@ -308,8 +315,8 @@ Each layer alone wasn't the problem; the combination was. Evidence: same AP conf
 | Layer | Change | Location |
 |-------|--------|----------|
 | Kernel Wi-Fi | `iw dev wlan0 set power_save off` after `klipper.service` is up — keeps radio awake for Moonraker PINGs but preserves the boot-time power protection that stops radio-wake spikes from corrupting SKR Pico UART init | [`wlan0-powersave-off.service`](../../stitchlabos/image/src/modules/stitchlabos/filesystem/etc/systemd/system/wlan0-powersave-off.service) |
-| Moonraker | `websocket_ping_interval=30, websocket_ping_timeout=25` (was 10/~25) — tolerates a full ping cycle of jitter | sed patch in [`start_chroot_script`](../../stitchlabos/image/src/modules/stitchlabos/start_chroot_script) → `/home/pi/moonraker/moonraker/components/application.py` |
-| Frontend | `server.info` keepalive every 10 s, heartbeat armed on `onopen`, exponential backoff reconnect (1 → 30 s, no ceiling), fix latent `removeWaitById` index-0 bug | [`webSocketClient.ts`](../../mainsail/src/plugins/webSocketClient.ts) |
+| Moonraker | `websocket_ping_interval=30, websocket_ping_timeout=25` (was 10/~25) — tolerates a full ping cycle of jitter | `[stitchlab_ws_tuning]` in `moonraker.conf` — component [`stitchlab_ws_tuning.py`](../../stitchlabos/image/src/modules/stitchlabos/filesystem/usr/local/lib/stitchlabos/moonraker/stitchlab_ws_tuning.py) sets both values in Tornado's settings at startup, without editing Moonraker's files |
+| Frontend | `server.info` keepalive every 10 s, heartbeat armed on `onopen`, exponential backoff reconnect (1 → 30 s, no ceiling), fix latent `removeWaitById` index-0 bug | [`webSocketClient.ts`](https://github.com/prntr/mainsail/blob/0655e0fb0142e0c5dbbc4a87a14c3bd37d8993b5/src/plugins/webSocketClient.ts) |
 
 **Residual behavior (accepted):**
 Chromium-based browsers aggressively throttle `setInterval` in *backgrounded* tabs (≥1 min after ~5 min hidden), which pauses the 10 s keepalive. This can cause an occasional clean reconnect when the user refocuses a long-backgrounded Mainsail tab. Safari does not throttle as aggressively. Reconnects are fast (<1 s) and transparent; not considered a bug. Full fix scoped for a future RC in [proposals/websocket-worker-isolation.md](../proposals/websocket-worker-isolation.md) (move WebSocket into a Dedicated Web Worker — unaffected by main-thread throttling, supported by all target browsers).
@@ -318,7 +325,7 @@ Chromium-based browsers aggressively throttle `setInterval` in *backgrounded* ta
 ```bash
 # On the Pi:
 sudo iw dev wlan0 get power_save                   # expected: "Power save: off"
-grep websocket_ping /home/pi/moonraker/moonraker/components/application.py  # expected: 30./25.
+grep stitchlab_ws_tuning /home/pi/printer_data/logs/moonraker.log  # expected: ping interval 30 s, timeout 25 s
 systemctl is-enabled wlan0-powersave-off.service   # expected: enabled
 
 # Watch a fresh connection — no "ping timed out" closes while the browser tab is in the foreground:
@@ -326,7 +333,7 @@ tail -f /home/pi/printer_data/logs/moonraker.log | grep -iE 'websocket|ping'
 ```
 
 **If the loop comes back:**
-- A Moonraker update via `update_manager` will revert the `application.py` patch. Re-apply with the sed in [`start_chroot_script`](../../stitchlabos/image/src/modules/stitchlabos/start_chroot_script) (guarded by a `grep` so it's idempotent).
+- A Moonraker update can rename the internals `stitchlab_ws_tuning` reaches into. It then logs `application layout changed` and Moonraker keeps its defaults; adapt the component, or move the values into native Moonraker config if that version exposes them.
 - Verify `wlan0-powersave-off.service` is active with `systemctl status wlan0-powersave-off` — if it failed, check that `klipper.service` is starting (the unit is ordered `After=klipper.service`).
 
 ---
@@ -418,7 +425,7 @@ dns-sd -G v4 stitchlab.local  # macOS
 
 **Root Cause Found:** The "remote mode" message appears because `instancesDB` was set to `"browser"` instead of `"moonraker"`.
 
-**Source Code Reference:** [TheSelectPrinterDialog.vue:226](../../mainsail/src/components/TheSelectPrinterDialog.vue#L226)
+**Source Code Reference:** [TheSelectPrinterDialog.vue:226](https://github.com/prntr/mainsail/blob/0655e0fb0142e0c5dbbc4a87a14c3bd37d8993b5/src/components/TheSelectPrinterDialog.vue#L226)
 ```vue
 <template v-if="instancesDB === 'browser'">
     <!-- Remote mode dialog shown here -->

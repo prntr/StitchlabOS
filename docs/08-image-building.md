@@ -16,22 +16,132 @@ StitchLabOS is built using [CustomPiOS](https://github.com/guysoft/CustomPiOS) (
 | KIAUH | Klipper management tool |
 | Katapult | MCU bootloader |
 | AccessPopup | WiFi AP fallback mode |
-| live_jogd | USB serial bridge |
+| live_jogd | USB serial bridge, installed but started by the Controller menu on demand |
+
+### SKR Pico firmware is part of the image
+
+A factory-fresh SKR Pico holds no Klipper firmware, so a freshly flashed card
+alone leaves Klipper without an MCU. Beta1 required building firmware on a
+separate dev machine; a Pi in AP mode has no internet, so "build it on the Pi"
+was not an option either.
+
+CI now builds the firmware from `firmware/skr-pico/*.config` and the
+`pico-firmware` module ships it in `/home/pi/firmware/`:
+
+| File | Purpose |
+|---|---|
+| `katapult.uf2` | Bootloader at `0x10000100`, written once over USB BOOTSEL |
+| `klipper.bin` | Application at `0x10004000`, written through Katapult over `/dev/serial0` |
+| `klipper.uf2` | Same application as a UF2 — only boots with Katapult present |
+| `klipper-standalone.uf2` | Bootloader-free build at `0x10000100` for rescuing a board |
+
+Commissioning is one command on the Pi:
+
+```bash
+ssh pi@stitchlab.local
+stitchlab-flash-pico
+```
+
+It stops Klipper, waits for the Pico to appear in BOOTSEL mode, writes Katapult,
+flashes Klipper over the UART (retrying the known RP2040 serial-resync quirk),
+restarts Klipper and checks `klippy.log` for the MCU. After that, every firmware
+update runs over `/dev/serial0` alone — no jumper, no cable. See
+[11-commissioning.md](11-commissioning.md).
+
+**Config contract.** The seed configs pin UART0 on GPIO0/GPIO1 at **115200 baud**,
+which must equal `baud:` in
+[`printer.cfg`](../stitchlabos/image/src/modules/klipper/filesystem/home/pi/printer_data/config/printer.cfg).
+Upstream renamed these symbols to the `RPXXXX_*` / `MACH_RPXXXX` family (older
+notes say `CONFIG_RP2040_FLASH_START_4000`); the addresses are unchanged. CI
+asserts that every seeded symbol survives `make olddefconfig`, so a further
+rename fails the build instead of shipping mute firmware.
+
+**Klipper version.** Host and firmware are both built from the release's pin,
+`KLIPPER_REF` in [`stitchlabos/image/upstream-pins.conf`](../stitchlabos/image/upstream-pins.conf),
+and carry the same version string (`v0.13.0-786-g461c4e3722c3` for beta6; Moonraker's panel abbreviates it to `v0.13.0-786-g461c4e37`). The Update
+Manager is pinned to that commit, so it offers no Klipper update until a release
+moves the pin; after such a move, reflash the Pico with `stitchlab-flash-pico --uart`.
+See [Release pins and the drift check](#release-pins-and-the-drift-check).
 
 ## GitHub Repository
 
 - Repo: `https://github.com/prntr/StitchlabOS`
-- Main submodules: `mainsail` → `prntr/mainsail` (branch `stitchlabos/v2.17.0`), `turtlestitch` → `prntr/turtlestitch` (branch `master`)
+- Main submodules: `mainsail` → `prntr/mainsail` (branch `stitchlabos/v2.17.0`), `turtlestitch` → `prntr/turtlestitch` (branch `master`), `stitchlabos-config` → `prntr/stitchlabos-config` (branch `main`)
+
+## Release pins and the drift check
+
+[`stitchlabos/image/upstream-pins.conf`](../stitchlabos/image/upstream-pins.conf) fixes
+the upstream commits a release ships: Klipper, Katapult, Moonraker and
+mainsail-config (wissen D-072; beta6 uses the beta5 build's commits). CI builds the
+firmware from them and the image modules clone exactly them; Moonraker's Update
+Manager is pinned to the Klipper and Moonraker commits.
+
+`make klipper-drift` (Docker and network; `.github/workflows/klipper-drift.yml`
+runs it weekly and on every release tag, next to the image build) runs our
+`printer.cfg` (and a hybrid-gantry variant), `embroidery_macros.cfg` at the pinned
+`stitchlabos-config` commit, `mainsail.cfg` and the synthetic jobs in
+`stitchlabos/drift/samples/` through klippy batch mode — the way Klipper's own
+`scripts/test_klippy.py` does, against the SKR Pico's data dictionary built from
+`firmware/skr-pico/klipper.config` — once at the pin and once at upstream master.
+The report (`.local/klipper-drift/<time>/report.md`, a CI artefact and job summary)
+lists samples that misbehave at the pin, differences in exit status, Klipper's
+responses and MCU commands between the two, the upstream commits since the pin that
+touch `gcode.py`, `gcode_move.py`, `virtual_sdcard.py`, `homing.py`,
+`homing_override.py`, `pause_resume.py`, `gcode_macro.py` and `configfile.py`, the
+new lines in `docs/Config_Changes.md`, and mainsail-config's new commits. It exits 1
+only when a sample breaks its own expectation at the pin (header lines
+`; drift: expect=…`, `log=…`, `nolog=…`).
+
+The samples also hold the machine side of the beta6 G-code contract
+(`stitchlabos-config`'s `embroidery_macros.cfg`) to what the intake assumes:
+
+- `M30` and `M2` end a job without an error. `M30` is a macro that replaces
+  `virtual_sdcard`'s own `M30` (an error, "SD write not supported") with
+  `rename_existing: M30.1`, so a Klipper change to that registration is drift
+  that matters.
+- `M0`, `M00`, `M600` and `COLOR_CHANGE` pause in place; while paused the idle
+  timeout is `pause_idle_timeout` (1800 s), so the motors stay on during rethreading.
+- `SDCARD_PRINT_FILE` starts every job with needle up, `G90`, `G92 Z0` and
+  `G1 F<job_feedrate>` (default `max_z_velocity` × 60). Job files therefore need no
+  `F`, and the intake reports a missing one only as info.
+- A needle or homing macro inside a job stops it ("refused: a job is printing");
+  the intake blocks such files (`NEEDLE_MACRO_IN_JOB`).
+
+With the `embroidery_macros.cfg` the submodule pinned before beta6 the check fails on
+purpose: `M30` ends the job in an error and `M00` does not pause.
+
+Batch mode cannot show what an endstop does: homing never triggers, so the check
+runs with `[stepper_z] position_max: 200` (`stitchlabos/drift/sim.cfg`). Try a
+macro change with `KLIPPER_DRIFT_MACROS=<path>`, a pin move with
+`KLIPPER_DRIFT_PIN=<commit>`, and a local `printer.cfg` that must not enter the repo
+with `KLIPPER_DRIFT_EXTRA="name=/path/printer.cfg"`.
 
 ## Using Pre-built Images
 
 ### Raspberry Pi Imager
 
+**Preferred — StitchLabOS as a selectable OS.** CI publishes an `os_list.json`
+with each release, so Imager can offer StitchLabOS like any other image, with its
+customisation dialog available:
+
+```bash
+rpi-imager --repo https://github.com/prntr/StitchlabOS/releases/latest/download/os_list.json
+```
+
 1. Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-2. Select **Choose OS → Other general-purpose OS → Use custom**
-3. Enter URL: `https://github.com/prntr/StitchlabOS/releases/latest/download/StitchLabOS-latest.img.xz`
-4. **Skip** the Imager customization dialog (hostname/WiFi/SSH) — it is not supported (see [Troubleshooting](#pi-imager-anpassen-button-is-grayed-out)). StitchLabOS ships with SSH enabled, a default password, and automatic AP mode for WiFi setup.
+2. Start it with the `--repo` argument above
+3. **Choose OS → StitchLabOS**
+4. Customisation (hostname/WiFi/SSH) is optional — the image already ships SSH, a
+   default password and AP-mode WiFi setup
 5. Flash to SD card
+
+**Fallback — direct image.** **Choose OS → Use custom**, then pick the `.img.xz`
+from the [release page](https://github.com/prntr/StitchlabOS/releases/latest). Do
+not hand-type an asset URL: the filename carries the version
+(`StitchLabOS-v0.1.0-beta.1.img.xz`), and there is deliberately no `-latest`
+alias. On this path Imager cannot read an `init_format`, so its customisation
+dialog stays greyed out — see
+[Troubleshooting](#pi-imager-anpassen-button-is-grayed-out).
 
 ### Direct Download
 
@@ -45,16 +155,16 @@ GitHub Actions builds on tags (`v*`) and manual dispatch. **Never** on every pus
 
 ### Build Steps (in order)
 
-1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail` and `prntr/turtlestitch`)
+1. Checkout repo with `submodules: recursive` (pulls `prntr/mainsail`, `prntr/turtlestitch` and `prntr/stitchlabos-config`), then load the pins from `stitchlabos/image/upstream-pins.conf` and check the release tags: on a `v*` tag, `prntr/stitchlabos-config` and `prntr/turtlestitch` must carry the same tag at the pinned submodule commits, or the build stops here with the commands to create them ([09-update-strategy.md](09-update-strategy.md#versions-and-tags))
 2. Build Mainsail: `npm ci && npm run build`, copy `dist/` → `modules/mainsail/filesystem/home/pi/mainsail/`
-3. Copy TurtleStitch submodule → `modules/turtlestitch/filesystem/home/pi/turtlestitch/`
+3. Prepare TurtleStitch as a standalone repo in `modules/turtlestitch/filesystem/home/pi/turtlestitch/`. The submodule itself cannot be copied: checkout leaves it with a `.git` *file* (`gitdir: ../.git/modules/turtlestitch`) and a detached HEAD, which Moonraker's update_manager rejects on the Pi. The step checks that the submodule commit is on `origin/master` (fails otherwise), then builds a shallow clone from the local submodule — just deep enough to reach that commit from `origin/master` — with `master` checked out on the commit, tracking `origin/master` on `https://github.com/prntr/turtlestitch.git`. The remote fetches `master` only (`remote add -t master`): the other branches would pull the full ~1.4 GB history on the Pi's first update check. The turtlestitch module's `start_chroot_script` fails the build if the unpacked repo is not a clean `master` tracking `origin/master`.
 4. Install host dependencies (including `gitpython` for CustomPiOS's `execution_order.py`)
 5. Clone CustomPiOS (`--depth=1`)
 6. Download Raspberry Pi OS Lite arm64 (`.img.xz`) into `stitchlabos/image/src/image-raspberrypiarm64/` — **this exact path is required** by CustomPiOS's `generate_board_config.py` which searches `$DIST_PATH/image-{BOARD}/` for `*.xz` files to set `BASE_ZIP_IMG`. The image is also **expanded to 6GB** before recompressing: Pi OS Lite only has ~1.5GB free on its rootfs which isn't enough for Klipper/Moonraker deps + pip virtualenvs. Expansion: `truncate -s 6G img` → `parted resizepart 2 100%` → `losetup -P` → `e2fsck -fy` + `resize2fs` → `xz -1 -T0`.
-7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... bash -x .../build`
+7. Run CustomPiOS build: `sudo DIST_PATH=... CUSTOM_PI_OS_PATH=... STITCHLABOS_CONFIG_REF=... KLIPPER_REF=... KATAPULT_REF=... MOONRAKER_REF=... MAINSAIL_CONFIG_REF=... bash -x .../build`. `STITCHLABOS_CONFIG_REF` is the submodule pin; the other four come from `upstream-pins.conf`, and the firmware step built `klipper.bin`/`klipper.uf2` and `katapult.uf2` from `KLIPPER_REF` and `KATAPULT_REF`. The modules clone with `stitchlab-clone-at-ref` (shipped by the `klipper` module), which puts the branch on exactly that commit — so host Klipper and the Pico firmware run the same commit, `flashtool.py` matches the bootloader, and a tag rebuilds the same image — and then deepens to the nearest version tag, so the Update Manager shows a real version. The commit must be on the tracked branch (`main`/`master`) and the checkout stays that branch tracking `origin`; a detached or diverged checkout would block Moonraker's update_manager on the Pi, so the build fails instead.
 8. Compress output with `xz -9`, generate sha256
 9. Upload as artifact (7-day retention)
-10. Create GitHub Release on tags
+10. On tags: create the GitHub Release as a **draft**, check it through the API (every asset uploaded and non-empty, `os_list.json` names this release's image with its size, the uploaded `os_list.json` is the generated one, the icon resolves), publish it, then check the public URLs including `/releases/latest/`. A failing draft check leaves the release unpublished; a failing public check turns it back into a draft.
 
 ### Key CustomPiOS API Notes
 
@@ -92,7 +202,7 @@ stitchlabos/image/src/
     ├── katapult/                   # Katapult bootloader
     ├── accesspopup/                # AP mode fallback
     ├── mainsail/                   # nginx config; dist files copied by CI
-    ├── turtlestitch/               # nginx config; files copied by CI
+    ├── turtlestitch/               # nginx config; git repo prepared by CI
     ├── live-jogd/                  # USB serial daemon
     └── stitchlabos/                # Final customizations (wifi_manager, macros, hostname)
 ```
@@ -110,7 +220,7 @@ MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd
 ### Module Script Notes
 
 - **virtualenvs**: Use `virtualenv -p python3 <path>` not `python3 -m venv` — `ensurepip` fails on Debian Trixie
-- **git clones**: Always use `--depth=1` to save image space
+- **git clones**: Always shallow to save image space. A repo whose commit must match something else (Klipper ↔ Pico firmware, Katapult ↔ `katapult.uf2`, a submodule pin, a pin in `upstream-pins.conf`) is cloned with `/usr/local/bin/stitchlab-clone-at-ref URL BRANCH REF DEST`, which deepens only as far as that commit and its nearest version tag (Klipper: about 800 commits, 18 MB)
 - **Klipper/Moonraker**: Remove `docs/` after cloning — large image assets cause "No space left on device"
 - **ARM toolchain** (`gcc-arm-none-eabi`, `libnewlib-arm-none-eabi`, `avrdude`): NOT installed in the image — firmware is compiled on a dev machine, not on the Pi
 - **Mainsail/TurtleStitch**: Both `start_chroot_script` files must call `unpack /filesystem/home/pi /home/pi pi` to copy CI-built assets into the image
@@ -119,7 +229,7 @@ MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd
 
 ```bash
 export DIST_NAME="StitchLabOS"
-export DIST_VERSION="0.1.0"
+export DIST_VERSION="${STITCHLABOS_VERSION:?…}"   # from the tag, e.g. 0.1.0-beta.5; written to /etc/stitchlabos_version
 export BASE_BOARD="raspberrypiarm64"
 export BASE_IMAGE_SECTION="latest"
 export MODULES="base(klipper,kiauh,katapult,accesspopup,mainsail,turtlestitch,live-jogd,stitchlabos)"
@@ -139,7 +249,11 @@ No Pi Imager customization needed — StitchLabOS is ready to use out of the box
 1. **AP Mode**: On first boot (no WiFi configured), AccessPopup creates a hotspot within ~30 seconds
    - SSID: `Stitchlab`, password: `praxistest`, IP: `192.168.50.5`
 2. **Adding WiFi**: Connect to the Stitchlab AP → open `http://stitchlab.local` (or `http://192.168.50.5`) → use the WiFi Manager in Mainsail
-3. **SSH**: Enabled by default. Login: `pi` / `lab`
+3. **SSH**: Enabled by default. Login: `pi` / `lab`. IPv4 only, like nginx, Moonraker
+   and Avahi (`stitchlab.local` resolves to IPv4 only): a hotspot with an IPv6 uplink
+   gives the Pi a global IPv6 address, and the default password should not be
+   offered there (`/etc/ssh/sshd_config.d/10-stitchlab-ipv4-only.conf`,
+   `stitchlab-configure-avahi`)
 4. **Hostname**: `stitchlab` (resolves as `stitchlab.local` via avahi)
 
 ### Access
@@ -156,10 +270,17 @@ ssh pi@192.168.50.5
 
 ```bash
 ssh pi@stitchlab.local
-systemctl status nginx moonraker klipper live_jogd
+systemctl status nginx moonraker klipper
+systemctl is-enabled live_jogd       # expected: static
+systemctl is-active live_jogd || true # expected: inactive until Controller-menu connect
+grep -qx live_jogd /home/pi/printer_data/moonraker.asvc && echo live_jogd-allowed
+systemctl show -p LoadState --value live_jogd.service   # expected: loaded
+git -C /home/pi/moonraker status --porcelain   # expected: empty, or update_manager refuses updates
 systemctl list-timers | grep AccessPopup
 ls /dev/serial0   # UART for SKR Pico — must exist
 tail -5 /home/pi/printer_data/logs/klippy.log
+# Host and MCU from the same Klipper commit: both lines show the same version
+grep -E "^Git version|^Loaded MCU 'mcu'" /home/pi/printer_data/logs/klippy.log | tail -2
 ```
 
 ### Access Points
@@ -174,7 +295,19 @@ tail -5 /home/pi/printer_data/logs/klippy.log
 
 ### Pi Imager "Anpassen" button is grayed out
 
-Pi Imager customization (hostname/WiFi/SSH) is not supported — the button is grayed out. This is intentional: StitchLabOS ships with SSH enabled (`pi` / `lab`), a fixed hostname (`stitchlab`), and automatic AP mode (`Stitchlab` / `praxistest`) for WiFi setup on first boot. No manual configuration is needed.
+This is a property of the **Use custom** path, not of the image. Imager greys the
+customisation dialog out whenever it cannot read an `init_format` for the
+selected image — and a hand-picked `.img.xz` carries no metadata.
+
+Start Imager with `--repo .../os_list.json` (see [Using Pre-built
+Images](#using-pre-built-images)) and the dialog is available: the image keeps
+cloud-init (`KEEP_CLOUDINIT="yes"` in `src/config`), which is why the OS list
+declares `init_format: cloudinit-rpi` — the same value current Raspberry Pi OS
+uses. `systemd` is the *Legacy* Raspberry Pi OS value and would be wrong here.
+
+Either way no manual configuration is required: StitchLabOS ships with SSH
+enabled (`pi` / `lab`), the hostname `stitchlab`, and AP mode
+(`Stitchlab` / `praxistest`) for WiFi setup on first boot.
 
 ### AccessPopup WiFi not appearing
 
@@ -221,11 +354,21 @@ CustomPiOS auto-generates `BASE_OVERRIDE_HOSTNAME` from `DIST_NAME` (lowercased)
 
 `userconf-pi` runs on first boot and sets the password from `BASE_USER_PASSWORD`. Any `chpasswd` call inside a chroot script is overwritten. Always set the password via `BASE_USER_PASSWORD` in `src/config`.
 
+### SSH login closes with "This account is currently not available"
+
+SSH is enabled, and the password was accepted, but the `pi` user's shell is set to `nologin` instead of `/bin/bash`. The StitchLabOS module forces `pi` to `/bin/bash` during the image build before setting the default password, so releases remain SSH-accessible even if the base Raspberry Pi OS image has a first-boot `userconf-pi` regression.
+
+Manual recovery on a mounted/root shell:
+```bash
+sudo usermod -s /bin/bash pi
+sudo passwd pi
+```
+
 ### "No space left on device" during build
 
 - The base image is expanded to 6GB in the CI workflow before building (see step 6 above)
 - ARM toolchain (`gcc-arm-none-eabi` etc.) is NOT installed — ~700MB saving
-- All `git clone` calls use `--depth=1`
+- All `git clone` calls are shallow (`--depth=1`, or deepened only to the pinned commit and its nearest tag)
 - `docs/` is removed from Klipper and Moonraker after cloning
 
 ### "Error: could not find image"
