@@ -64,7 +64,8 @@ you actually edited.
 | `make setup` | `npm ci` in `mainsail/` |
 | `make dev` | serve the Mainsail UI locally |
 | `make sim` | start the virtual Klipper printer (Docker) |
-| `make test` | `test-intake`, `test-pico`, `test-wifi`, `test-jogd` and `test-image`, then Mainsail's Cypress E2E suite — slow, needs a browser |
+| `make build` | build the Mainsail UI into `mainsail/dist/`, as CI does |
+| `make test` | `test-intake`, `test-pico`, `test-wifi`, `test-jogd` and `test-image`, then `build` and Mainsail's Cypress E2E suite against that fresh build — slow, needs a browser |
 | `make test-intake` | pytest for the G-code intake module, via `uv` on Python 3.13 — fast, no hardware |
 | `make test-pico` | pytest for the Pico flash tools (`stitchlab-flash-pico`, `stitchlab-uf2-clear-app`) — fast, no hardware |
 | `make test-wifi` | pytest for the Wi-Fi manager (Moonraker component and scripts in `stitchlabos-config`) — fast, no NetworkManager |
