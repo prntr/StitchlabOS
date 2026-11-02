@@ -1,5 +1,5 @@
 # Agent-Kontrakt -- siehe ~/Code/_std/AGENTS.base.md
-.PHONY: setup dev sim test test-intake test-pico test-wifi test-jogd test-image klipper-drift lint check status help
+.PHONY: setup dev sim build test test-intake test-pico test-wifi test-jogd test-image klipper-drift lint check status help
 .DEFAULT_GOAL := help
 
 # Meta-Repo fuer StitchLabOS: ein Raspberry-Pi-Image, das Klipper, Moonraker,
@@ -22,10 +22,15 @@ dev:     ## Mainsail-Oberflaeche lokal ausliefern
 sim:     ## virtuellen Klipper-Drucker starten (Docker)
 	cd virtual-klipper-printer && docker compose up -d
 
+build:   ## Mainsail-Oberflaeche nach mainsail/dist/ bauen (wie in CI)
+	cd mainsail && npm run build
+
 INTAKE = stitchlabos/image/src/modules/stitchlab-intake
 PICO = stitchlabos/image/src/modules/pico-firmware
 
-test: test-intake test-pico test-wifi test-jogd test-image  ## Tests: Intake, Pico-Werkzeuge, WLAN-Verwaltung, live_jogd, Image-Skripte, dann die Mainsail-Oberflaeche
+# Cypress prueft, was `vite preview` aus mainsail/dist/ ausliefert. Ohne den
+# Build davor testet das Tor einen veralteten Stand und meldet falsche Fehler.
+test: test-intake test-pico test-wifi test-jogd test-image build  ## Tests: Intake, Pico-Werkzeuge, WLAN-Verwaltung, live_jogd, Image-Skripte, dann die frisch gebaute Mainsail-Oberflaeche
 	cd mainsail && npm test
 
 test-intake:  ## Tests des G-Code-Intake (pytest in uv, Python wie auf dem Pi)
